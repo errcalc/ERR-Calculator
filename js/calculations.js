@@ -53,11 +53,17 @@ function applyIntExpenseAccrual(rows, monthlyCof, cofForRow = null) {
   }
 }
 
-// Number of quarterly payment months in [from..to] (months divisible by 3)
-function countQuarterlyMonths(from, to) {
-  let n = 0;
-  for (let m = from; m <= to; m++) if (m % 3 === 0) n++;
-  return n;
+// Months per payment period for a payment type: 1 = monthly, 3 = quarterly.
+function monthsPerPeriod(type) {
+  const t = String(type || '');
+  return (t === 'EQI' || t.includes('(Quarterly)')) ? 3 : 1;
+}
+
+// Payments needed to COVER [from..tenor] at `ppm` months each. Any leftover month brings
+// one more (imaginary) period: a 25-month span at ppm=3 needs 9, not 8 — same ceil rule as
+// buildStructuredSchedule / buildRateRevisionStructured.
+function periodsToCover(from, tenor, ppm) {
+  return Math.max(1, Math.ceil((tenor - from + 1) / ppm));
 }
 
 // ============================================================
@@ -278,100 +284,76 @@ export function buildCustomizedSchedule(p) {
     const isLastLayer = (li === sorted.length - 1);
 
     let pmt = 0;
-    let ppy = 12;
-    if (L.paymentType === 'EMI' || L.paymentType === 'Equal Principal + Interest (Monthly)') ppy = 12;
-    else if (L.paymentType === 'EQI' || L.paymentType === 'Equal Principal + Interest (Quarterly)' || L.paymentType === 'Customized Principal (Quarterly)') ppy = 4;
+    // Payment months are LAYER-RELATIVE: the layer's own start month counts as month 1 of its
+    // first period, so quarterly pays on layer months 3, 6, 9, ... The layer's FINAL month is
+    // always a payment month too — if it isn't a whole period from the previous one it becomes
+    // a stub (same installment, interest prorated over the months actually elapsed).
+    const ppm = monthsPerPeriod(L.paymentType);
+    const isPaymentMonth = (m) => ((m - from + 1) % ppm === 0) || (m === to);
 
     // Equal Principal + Interest layers: the per-period principal is CONSTANT and sized over
     // the periods remaining to MATURITY (not just the layer's own span). So a layer that ends
     // before maturity only partially amortizes, leaving a balance for the next layer.
-    //   principal = (balance at layer start) / periods-to-maturity
-    //   periods-to-maturity (monthly)   = tenor - from + 1
-    //   periods-to-maturity (quarterly) = (tenor - from + 1) / 3
     const layerStartBalance = urpa;
     let epiConstPrincipal = 0;
-    if (L.paymentType === 'Equal Principal + Interest (Monthly)') {
-      const periodsToMaturity = tenorMonths - from + 1;
-      epiConstPrincipal = periodsToMaturity > 0 ? layerStartBalance / periodsToMaturity : layerStartBalance;
-    } else if (L.paymentType === 'Equal Principal + Interest (Quarterly)') {
-      const periodsToMaturity = (tenorMonths - from + 1) / 3;
-      epiConstPrincipal = periodsToMaturity > 0 ? layerStartBalance / periodsToMaturity : layerStartBalance;
+    if (L.paymentType && L.paymentType.startsWith('Equal Principal + Interest')) {
+      const periodsToMaturity = periodsToCover(from, tenorMonths, ppm);
+      epiConstPrincipal = layerStartBalance / periodsToMaturity;
     }
 
-    if (L.paymentType === 'EMI') {
-      // Size the EMI annuity over the periods remaining to MATURITY (not just this layer's
-      // span), so a layer that ends before maturity only partially amortises and leaves a
-      // balance for the next layer (matching the Equal-Principal layer behaviour).
-      pmt = PMT(ratePerYear / 12, Math.max(1, tenorMonths - from + 1), -urpa);
-      if (!layerInstallments['EMI']) layerInstallments['EMI'] = pmt;
-    } else if (L.paymentType === 'EQI') {
-      // Quarterly payments remaining to MATURITY (m%3===0 from this layer's start through
-      // the loan tenor), so an EQI layer ending before maturity only partially amortises.
-      const qCount = countQuarterlyMonths(from, tenorMonths);
-      pmt = PMT(ratePerYear / 4, Math.max(1, qCount), -urpa);
-      if (!layerInstallments['EQI']) layerInstallments['EQI'] = pmt;
+    if (L.paymentType === 'EMI' || L.paymentType === 'EQI') {
+      // Size the annuity over the periods remaining to MATURITY (not just this layer's span),
+      // so a layer that ends before maturity only partially amortises and leaves a balance for
+      // the next layer (matching the Equal-Principal layer behaviour). Leftover months round
+      // the period count UP — see periodsToCover.
+      pmt = PMT(ratePerYear * ppm / 12, periodsToCover(from, tenorMonths, ppm), -urpa);
+      if (!layerInstallments[L.paymentType]) layerInstallments[L.paymentType] = pmt;
     } else if (L.paymentType === 'Equal Principal + Interest (Monthly)' && !layerInstallments['Installment']) {
       layerInstallments['Installment'] = (urpa / count) + urpa * monthlyRate;
     } else if (L.paymentType === 'Equal Principal + Interest (Quarterly)' && !layerInstallments['Installment']) {
-      const qPeriods = Math.max(1, countQuarterlyMonths(from, to));
+      const qPeriods = periodsToCover(from, to, 3);
       layerInstallments['Installment'] = (urpa / qPeriods) + urpa * (ratePerYear / 4);
     } else if (L.paymentType && L.paymentType.startsWith('Customized Principal') && !layerInstallments['Customized']) {
       layerInstallments['Customized'] = (L.customPrincipal || 0) + urpa * monthlyRate;
     }
 
     let paymentCounter = 0;
+    // Interest is settled on payment months only, over the months actually ELAPSED since the
+    // previous payment. A whole quarter gives exactly balance * rate/4; a layer-end stub
+    // prorates. Seeded at from-1 so the layer's first payment covers from its start month.
+    let prevPayMonth = from - 1;
+    const ptype = String(L.paymentType || '');
     for (let m = from; m <= to; m++) {
-      let installment = 0, interest = 0, principal = 0;
-      const monthsInLayer = m - from + 1;
-      const isPmtMonth = (ppy === 12) || ((monthsInLayer - 1) % 3 === 0);
-      const lastMonthInLayer = (m === to);
-      const isLastInstallmentOfLoan = isLastLayer && lastMonthInLayer;
+      let installment = 0, interest = 0, principal = 0, stubOut;
+      const isLastInstallmentOfLoan = isLastLayer && (m === to);
+      const elapsed = m - prevPayMonth;
 
-      if (L.paymentType === 'Customized Principal (Monthly)') {
-        interest = urpa * monthlyRate;
-        principal = Math.min(L.customPrincipal || 0, urpa);
-        installment = principal + interest;
-      } else if (L.paymentType === 'Customized Principal (Quarterly)') {
-        // Custom principal paid on quarterly months (m%3===0: Mar/Jun/Sep/Dec). The interest
-        // accrued since the last quarterly payment (one quarter on the unchanged balance) is
-        // paid alongside it; non-payment months carry it forward to the next quarterly row.
-        if (m % 3 === 0) {
-          interest = urpa * (ratePerYear / 4);
+      if (isPaymentMonth(m)) {
+        interest = urpa * monthlyRate * elapsed;
+        if (elapsed !== ppm) stubOut = elapsed; // short final period of the layer
+        if (ptype === 'EMI' || ptype === 'EQI') {
+          installment = pmt;
+          principal = installment - interest;
+        } else if (ptype.startsWith('Equal Principal + Interest')) {
+          principal = Math.min(epiConstPrincipal, urpa);
+          installment = principal + interest;
+        } else if (ptype.startsWith('Customized Principal')) {
           principal = Math.min(L.customPrincipal || 0, urpa);
           installment = principal + interest;
         }
-      } else if (L.paymentType === 'EMI') {
-        interest = urpa * monthlyRate;
-        principal = pmt - interest;
-        installment = pmt;
-      } else if (L.paymentType === 'EQI') {
-        // EQI quarterly payments fall on absolute month divisible by 3 (Mar, Jun, Sep, Dec)
-        if (m % 3 === 0) {
-          interest = urpa * (ratePerYear / 4);
-          principal = pmt - interest;
-          installment = pmt;
-        }
-      } else if (L.paymentType === 'Equal Principal + Interest (Monthly)') {
-        interest = urpa * monthlyRate;
-        principal = Math.min(epiConstPrincipal, urpa);
-        installment = principal + interest;
-      } else if (L.paymentType === 'Equal Principal + Interest (Quarterly)') {
-        if (m % 3 === 0) {
-          interest = urpa * (ratePerYear / 4);
-          principal = Math.min(epiConstPrincipal, urpa);
-          installment = principal + interest;
-        }
+        prevPayMonth = m;
       }
 
-      // Final month of LOAN: settle remaining principal + accrued interest
+      // Final month of the LOAN: settle whatever principal remains, plus the interest accrued
+      // on it since the previous payment (the maturity-stub rule the Structured modules use)
+      // and any still-uncollected moratorium interest.
       if (isLastInstallmentOfLoan) {
-        const periodRate = (ppy === 4 ? ratePerYear / 4 : monthlyRate);
-        interest = urpa * periodRate;
         principal = urpa;
         installment = principal + interest + accruedReceivable;
         accruedReceivable = 0;
       } else if (li === 0 && paymentCounter === 0 && accruedReceivable > 0 && installment > 0) {
-        // Apply accrued moratorium interest to first installment of first layer
+        // Unpaid moratorium interest rides on top of the first installment of the first
+        // layer, and stays OUT of principal.
         installment += accruedReceivable;
         accruedReceivable = 0;
       }
@@ -380,7 +362,7 @@ export function buildCustomizedSchedule(p) {
       rows.push({
         sl: m, installment, interest, principal, urpa,
         interestExpense: urpa * monthlyCof, idpReceivable: accruedReceivable,
-        paymentType: L.paymentType,
+        paymentType: L.paymentType, isPaymentMonth: isPaymentMonth(m), stubMonths: stubOut,
       });
 
       if (installment > 0) paymentCounter++;
