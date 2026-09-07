@@ -554,10 +554,14 @@ export function downloadVerificationExcel(filename, ctx) {
     setCell(wsInputs, `E${yRow}`, 0, { f: `B${yRow}+D${yRow}-C${yRow}`, z: FMT.ACCOUNTING });
     // Avg Portfolio = AVERAGE of URPA across months in the year
     setCell(wsInputs, `F${yRow}`, 0, { f: `AVERAGE(Schedule!E${avgPortFromExcel}:E${avgPortToExcel})`, z: FMT.ACCOUNTING });
-    // NIM = NetII / AvgPort
-    setCell(wsInputs, `G${yRow}`, 0, { f: `IF(F${yRow}=0,0,E${yRow}/F${yRow})`, z: FMT.PCT4 });
-    // YoY ERR = (yearly Interest Expense / yearly Avg Portfolio) + yearly NIM
-    setCell(wsInputs, `H${yRow}`, 0, { f: `(C${yRow}/F${yRow})+G${yRow}`, z: FMT.PCT4 });
+    // A final stub year covers fewer than 12 months, so both legs are annualised by
+    // 12/months — otherwise the last year reads a raw period figure (a 2-month year
+    // showing 2.5% instead of ~15%). Full years scale by 1 and are unchanged.
+    const yMonths = lastSl - firstSl + 1;
+    // NIM = NetII / AvgPort, annualised
+    setCell(wsInputs, `G${yRow}`, 0, { f: `IF(F${yRow}=0,0,E${yRow}/F${yRow}*12/${yMonths})`, z: FMT.PCT4 });
+    // YoY ERR = (yearly Interest Expense / yearly Avg Portfolio, annualised) + yearly NIM
+    setCell(wsInputs, `H${yRow}`, 0, { f: `(C${yRow}/F${yRow}*12/${yMonths})+G${yRow}`, z: FMT.PCT4 });
   }
   lastRow = yColHeaderRow + years;
 
@@ -884,9 +888,12 @@ function downloadRevisionStructuredVerify(filename, ctx) {
     setCell(wsI, `D${yr}`, 0, { f: `SUM(Schedule!K${kFrom}:K${kTo})`, z: RR_FMT.NUM2, s: RR_STYLE.cell });
     setCell(wsI, `E${yr}`, 0, { f: `B${yr}+D${yr}-C${yr}`, z: RR_FMT.NUM2, s: RR_STYLE.cell });
     setCell(wsI, `F${yr}`, 0, { f: `AVERAGE(Schedule!F${fFrom}:F${fTo})`, z: RR_FMT.NUM2, s: RR_STYLE.cell });
-    setCell(wsI, `G${yr}`, 0, { f: `IF(F${yr}=0,0,E${yr}/F${yr})`, z: RR_FMT.PCT4, s: RR_STYLE.cell });
-    // YoY ERR = (yearly Interest Expense / yearly Avg Portfolio) + yearly NIM
-    setCell(wsI, `H${yr}`, 0, { f: `(C${yr}/F${yr})+G${yr}`, z: RR_FMT.PCT4, s: RR_STYLE.cell });
+    // A final stub year covers fewer than 12 months — annualise both legs by 12/months
+    // so it is comparable with the full years above it (full years scale by 1).
+    const yMonths = lastSl - firstSl + 1;
+    setCell(wsI, `G${yr}`, 0, { f: `IF(F${yr}=0,0,E${yr}/F${yr}*12/${yMonths})`, z: RR_FMT.PCT4, s: RR_STYLE.cell });
+    // YoY ERR = (yearly Interest Expense / yearly Avg Portfolio, annualised) + yearly NIM
+    setCell(wsI, `H${yr}`, 0, { f: `(C${yr}/F${yr}*12/${yMonths})+G${yr}`, z: RR_FMT.PCT4, s: RR_STYLE.cell });
   }
   const lastRow = 15 + years;
 
@@ -1117,8 +1124,11 @@ function computeYearlySummary(ctx) {
     }
     const avgPort = urpaN ? urpaSum / urpaN : 0;
     const nii = income + lsBen - expense;
-    const nim = avgPort ? nii / avgPort : 0;
-    const yoyErr = avgPort ? (expense / avgPort) + nim : 0;
+    // Annualise both legs by 12/months so a final stub year is comparable with the full
+    // years above it; full years scale by 1 and are unchanged.
+    const ann = 12 / (lastSl - firstSl + 1);
+    const nim = avgPort ? (nii / avgPort) * ann : 0;
+    const yoyErr = avgPort ? (expense / avgPort) * ann + nim : 0;
     out.push({ year: y + 1, income, expense, lsBen, nii, avgPort, nim, yoyErr });
   }
   return out;
