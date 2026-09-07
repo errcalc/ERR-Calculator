@@ -1,6 +1,6 @@
 // Per-module user guide — opened from the info button in the header. Plain, simple language
 // (explained as if to a 10-year-old). Sections are collapsed by default; click to expand.
-import { el, openModal, closeModal } from './components.js?v=20260908c';
+import { el, openModal, closeModal } from './components.js?v=20260908d';
 
 // ---- Shared sections reused across modules ----
 const IDP_SECTION = {

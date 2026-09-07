@@ -640,8 +640,19 @@ export function buildRateRevisionStructured(p) {
     rateLayers,
     securityLayers,
     cofData = null,     // sorted array of { date: 'YYYY-MM-DD', rate } from the uploaded COF file
+    // Split interest/principal modality — recognised structurally, like the Customized layer.
+    interestPeriod = null,
+    principalPeriod = null,
+    principalStartMonth = 1,
+    principalBasis = 'fixed',
+    customPrincipals = [],
+    intFlags = [],
   } = p;
 
+  const isSplit = !!(interestPeriod && principalPeriod);
+  // Principal dates and the divisor that keeps the payments equal (maturity included).
+  const splitPDates = isSplit ? principalPaymentMonths(principalStartMonth, tenorMonths, principalPeriod) : [];
+  const splitPSet = new Set(splitPDates);
   const ppy = periodsPerYear(paymentModality);
   const start = new Date(disbursementDate);
 
@@ -737,6 +748,48 @@ export function buildRateRevisionStructured(p) {
     // rowRate: rate shown/used for this row's accrual (period-start rate; after a
     // mid-period revision the row carries the NEW rate so block logic continues from it).
     let rowRate = getRateOn(accrualStart), splitSegments = null, splitFromSl, stubMonthsOut;
+    if (isSplit) {
+      // Interest ACCRUES monthly on the live balance and is only settled on interest months,
+      // so the accrual period is always one month — a rate revision landing inside it splits
+      // that month by DAYS360 and leaves principal untouched (the Q12 rule). Where the
+      // balance is unchanged across a quarter this is identical to splitting the quarter.
+      const pi = periodInterest(urpa, accrualStart, d, 12);
+      interest = pi.interest;
+      if (pi.segments) { splitSegments = pi.segments; splitFromSl = m - 1; rowRate = getRateOn(d); }
+      accruedReceivable += interest;
+
+      const prin = splitPSet.has(m);
+      // A principal month always settles its interest; otherwise the grid decides, falling
+      // back to the interest frequency.
+      const flag = prin ? 'paid'
+        : (intFlags[m - 1] || ((m % interestPeriod === 0 || m === tenorMonths) ? 'paid' : 'accrued'));
+      if (flag === 'capitalized') {
+        urpa += accruedReceivable; accruedReceivable = 0;
+      } else if (flag === 'paid') {
+        installment = accruedReceivable; accruedReceivable = 0;
+      }
+      if (prin) {
+        if (m === tenorMonths) {
+          principal = urpa;                          // maturity settles the balance
+        } else if (principalBasis === 'custom') {
+          principal = Math.min(customPrincipals[splitPDates.indexOf(m)] || 0, urpa);
+        } else {
+          principal = urpa / splitPDates.filter(x => x >= m).length;
+        }
+        installment += principal;
+        urpa = Math.max(0, urpa - principal);
+      }
+      rows.push({
+        sl: m, date: d, installment, interest, principal, urpa,
+        interestExpense: 0,
+        rate: rowRate, cof: cofPm,
+        securityAmount: sec.amount, securityRate: sec.rate,
+        idpReceivable: accruedReceivable,
+        splitSegments: splitSegments || undefined, splitFromSl,
+        intFlag: flag, isPrincipalMonth: prin,
+      });
+      continue;
+    }
     if (m <= moratoriumMonths) {
       // Moratorium month: interest accrues monthly; a revision mid-month splits by days/360.
       const pi = periodInterest(urpa, accrualStart, d, 12);
