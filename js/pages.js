@@ -3,23 +3,23 @@ import {
   el, numberField, percentField, optionField, dateField, textField,
   monthBoxesField, layeredField, securityLayersField, rateLayersField, toast, parseDDMMMYYYY, formatDDMMMYYYY,
   openModal, closeModal,
-} from './components.js?v=20260908a';
-import { isoToDDMMMYYYY } from './formatting.js?v=20260908a';
+} from './components.js?v=20260908c';
+import { isoToDDMMMYYYY } from './formatting.js?v=20260908c';
 import {
   buildStructuredSchedule, buildCustomizedSchedule,
   buildRateRevisionStructured, computeMetrics,
   buildSplitSchedule, principalPaymentMonths,
   computeRevisionMetrics, computeRevisionCustomizedMetrics, buildCofData,
   addMonthsDue,
-} from './calculations.js?v=20260908a';
-import { formatMoney, formatPercent, formatNumber } from './formatting.js?v=20260908a';
-import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20260908a';
+} from './calculations.js?v=20260908c';
+import { formatMoney, formatPercent, formatNumber } from './formatting.js?v=20260908c';
+import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20260908c';
 import {
   downloadScheduleAsExcel, downloadSampleAmortization, readUploadedSchedule,
   downloadScheduleAsWord, downloadScheduleAsPDF, downloadVerificationExcel, downloadReportPDF,
   downloadCofSample, readUploadedCof,
   downloadCustomizedRevisionSample, readCustomizedRevisionFile,
-} from './excel.js?v=20260908a';
+} from './excel.js?v=20260908c';
 
 // Cached page state by tab key (also persisted via storage saveDraft)
 const tabState = {};
@@ -466,7 +466,7 @@ export function renderCustomizedLoan(root) {
     getCount: () => moratoriumPeriod.getValue() || 0, selectAll: true, capitalizable: true,
   });
   const loanTenor = numberField({ label: 'Loan Tenor (Months)', name: 'loanTenor', integerOnly: true, min: 1 });
-  loanTenor.input.addEventListener('input', () => { refreshLayerOpts(); refresh(); paymentLayers.applyLayerRules(); });
+  loanTenor.input.addEventListener('input', () => { refreshLayerOpts(); refresh(); paymentLayers.applyLayerRules(); refreshSplitGrid(); });
 
   function fromOptions() {
     const tenor = loanTenor.getValue() || 0;
@@ -495,8 +495,16 @@ export function renderCustomizedLoan(root) {
       { key: 'paymentType', label: 'Payment Type', type: 'option', allowEmpty: true, placeholder: '— select —', options: [
           'Customized Principal (Monthly)', 'Customized Principal (Quarterly)', 'EMI', 'EQI',
           'Equal Principal + Interest (Monthly)', 'Equal Principal + Interest (Quarterly)',
-        ], width: '1.2fr' },
-      { key: 'customPrincipal', label: 'Custom Principal', type: 'number', width: '1.2fr' },
+          SPLIT_MODE,
+        ], width: '1.3fr' },
+      // Only meaningful for SPLIT_MODE layers; disabled for every other type. The layer's own
+      // From month anchors both legs, so there is no per-layer principal start — an
+      // interest-only prefix is just an earlier layer.
+      { key: 'intFreq', label: 'Interest Freq.', type: 'option', allowEmpty: true, placeholder: '—', options: FREQ_NAMES, width: '0.9fr' },
+      { key: 'prinFreq', label: 'Principal Freq.', type: 'option', allowEmpty: true, placeholder: '—', options: FREQ_NAMES, width: '0.9fr' },
+      // For SPLIT_MODE this is the amount paid on EACH principal date; blank divides the
+      // balance equally. Varying amounts per date are expressed by splitting into layers.
+      { key: 'customPrincipal', label: 'Custom Principal', type: 'number', width: '1.1fr' },
     ],
     addLabel: '+ Add Payment Layer',
     minRows: 2,
@@ -516,16 +524,67 @@ export function renderCustomizedLoan(root) {
       paymentLayers.rows.forEach((row) => {
         const ptype = row.inputs.paymentType.value;
         const cp = row.inputs.customPrincipal;
-        const isCustom = !!ptype && ptype.startsWith('Customized Principal');
-        cp.disabled = !isCustom;
-        cp.style.opacity = isCustom ? '1' : '0.4';
-        if (!isCustom) cp.value = '';
+        const split = ptype === SPLIT_MODE;
+        // Custom Principal: required for "Customized Principal", optional for the split type
+        // (blank = divide equally), meaningless for EMI/EQI/Equal-Principal.
+        const wantsCp = split || (!!ptype && ptype.startsWith('Customized Principal'));
+        cp.disabled = !wantsCp;
+        cp.style.opacity = wantsCp ? '1' : '0.4';
+        if (!wantsCp) cp.value = '';
+        [row.inputs.intFreq, row.inputs.prinFreq].forEach((f) => {
+          if (!f) return;
+          f.disabled = !split;
+          f.style.opacity = split ? '1' : '0.4';
+          if (!split) f.value = '';
+          else if (!f.value) f.value = (f === row.inputs.intFreq) ? 'Monthly' : 'Quarterly';
+        });
       });
+      refreshSplitGrid();
     },
   });
   // Toast on the layered field's "cannot add" callback (e.g. last layer already ends at maturity)
   paymentLayers.onCannotAdd = (msg) => toast(msg, 'error');
   function refreshLayerOpts() { paymentLayers.refreshOptions(); }
+
+  // ---- Split interest/principal support -------------------------------------------------
+  // One whole-tenor grid serves every split layer. Months belonging to other layer types are
+  // rendered inert, since their interest is decided by that layer's own payment type.
+  function splitLayers() {
+    return paymentLayers.getValue()
+      .filter(r => r.paymentType === SPLIT_MODE && r.fromInstallment && r.toInstallment)
+      .map(r => ({
+        from: Number(r.fromInstallment),
+        to: r.toInstallment === 'LAST' ? (loanTenor.getValue() || 0) : Number(r.toInstallment),
+        ip: FREQ[r.intFreq] || 1,
+        pp: FREQ[r.prinFreq] || 1,
+      }));
+  }
+  const splitLayerAt = (m) => splitLayers().find(L => m >= L.from && m <= L.to) || null;
+  const custSplitGrid = monthBoxesField({
+    name: 'custSplitFlags', label: 'Interest Treatment by Month',
+    getCount: () => (splitLayers().length ? (loanTenor.getValue() || 0) : 0),
+    selectAll: true, capitalizable: true, groupByYear: true,
+    disabledFn: (i) => !splitLayerAt(i + 1),
+    lockedFn: (i) => {
+      const L = splitLayerAt(i + 1);
+      if (!L) return false;
+      const m = i + 1;
+      return ((m - L.from + 1) % L.pp === 0) || m === L.to; // principal month
+    },
+    defaultFn: (i) => {
+      const L = splitLayerAt(i + 1);
+      if (!L) return 0;
+      const m = i + 1;
+      return (((m - L.from + 1) % L.ip === 0) || m === L.to) ? 1 : 0;
+    },
+  });
+  const custSplitWrap = el('div', { class: 'form-row full hidden' },
+    el('div', { class: 'sub-card' }, custSplitGrid));
+  function refreshSplitGrid() {
+    const any = splitLayers().length > 0;
+    custSplitWrap.classList.toggle('hidden', !any);
+    if (any) custSplitGrid.refresh();
+  }
 
   const totalCof = percentField({ label: 'Total Cost of Fund [COF/ISC + OPEX]', name: 'totalCof' });
   setTwoLineLabel(totalCof, 'Total Cost of Fund', '(COF/ISC + OPEX)');
@@ -545,6 +604,7 @@ export function renderCustomizedLoan(root) {
   section.appendChild(moraSection);
   section.appendChild(el('div', { class: 'form-row' }, loanTenor));
   section.appendChild(el('div', { class: 'sub-card' }, paymentLayers));
+  section.appendChild(custSplitWrap);
   section.appendChild(el('div', { class: 'form-row' }, totalCof, fundedSecurityType));
   // Security detail row — depends on Funded Security Type (rebuilt in refresh()).
   const secDetailRow = el('div', { class: 'form-row' });
@@ -582,6 +642,7 @@ export function renderCustomizedLoan(root) {
     resetButton('customized', () => renderCustomizedLoan(root), () => collectCustomizedInputs({
       loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
       loanTenor, paymentLayers, totalCof, fundedSecurityType, csAmount, csRate, numInst,
+      custSplitGrid,
     })), calcBtn));
   root.appendChild(section);
   const resultsPanel = el('div');
@@ -590,17 +651,20 @@ export function renderCustomizedLoan(root) {
   restoreDraft('customized', {
     loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
     loanTenor, paymentLayers, totalCof, fundedSecurityType, csAmount, csRate, numInst,
+    custSplitGrid,
   });
   refresh(); refreshLayerOpts();
   attachDraftAutosave('customized', section, () => collectCustomizedInputs({
     loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
     loanTenor, paymentLayers, totalCof, fundedSecurityType, csAmount, csRate, numInst,
+    custSplitGrid,
   }));
 
   calcBtn.addEventListener('click', () => {
     const inputs = collectCustomizedInputs({
       loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
       loanTenor, paymentLayers, totalCof, fundedSecurityType, csAmount, csRate, numInst,
+      custSplitGrid,
     });
     const err = validateCustomized(inputs);
     if (err) return toast(err, 'error');
@@ -616,6 +680,7 @@ export function renderCustomizedLoan(root) {
       capFlags: inputs.capFlags,
       cofRate: inputs.totalCof,
       layers: inputs.paymentLayers,
+      intFlags: inputs.custSplitFlags,
     };
     const schedule = buildCustomizedSchedule(params);
     const metrics = computeMetrics(schedule, {
@@ -649,7 +714,13 @@ function collectCustomizedInputs(f) {
       toInstallment: r.toInstallment === 'LAST' ? Number(tenor || 0) : (r.toInstallment ? Number(r.toInstallment) : null),
       paymentType: r.paymentType,
       customPrincipal: r.customPrincipal,
+      // Split layers only — the engine recognises a layer by these two being set.
+      interestPeriod: r.paymentType === SPLIT_MODE ? (FREQ[r.intFreq] || 1) : null,
+      principalPeriod: r.paymentType === SPLIT_MODE ? (FREQ[r.prinFreq] || 1) : null,
+      intFreq: r.intFreq, prinFreq: r.prinFreq,
     })),
+    custSplitStates: f.custSplitGrid ? f.custSplitGrid.getValue() : [],
+    custSplitFlags: f.custSplitGrid ? f.custSplitGrid.getIntFlags() : [],
     totalCof: f.totalCof.getValue(),
     fundedSecurityType: f.fundedSecurityType.getValue(),
     csAmount: f.csAmount.getValue(),
@@ -687,6 +758,12 @@ function validateCustomized(i) {
     if (L.toInstallment > endMonth) return `Layer ${k + 1}: To must be ≤ Month ${String(endMonth).padStart(2, '0')}.`;
     if (L.paymentType && L.paymentType.startsWith('Customized Principal') && !L.customPrincipal)
       return `Layer ${k + 1}: enter Custom Principal for the "${L.paymentType}" type.`;
+    if (L.paymentType === SPLIT_MODE) {
+      if (!L.intFreq || !L.prinFreq)
+        return `Layer ${k + 1}: select both an Interest Freq. and a Principal Freq.`;
+      if (FREQ[L.intFreq] > FREQ[L.prinFreq])
+        return `Layer ${k + 1}: interest cannot be paid less often than principal — ${L.intFreq} interest with ${L.prinFreq} principal leaves a principal month with no interest settlement.`;
+    }
   }
   // Sort and check for overlaps / gaps
   const sorted = i.paymentLayers.slice().sort((a, b) => a.fromInstallment - b.fromInstallment);
@@ -1242,6 +1319,7 @@ function restoreDraft(tabKey, fields) {
     if (fields.prinStart && data.prinStart) fields.prinStart.setValue(data.prinStart);
     if (fields.prinBasis && data.prinBasis) fields.prinBasis.setValue(data.prinBasis);
     if (fields.splitGrid && Array.isArray(data.splitStates)) fields.splitGrid.setValue(data.splitStates);
+    if (fields.custSplitGrid && Array.isArray(data.custSplitStates)) fields.custSplitGrid.setValue(data.custSplitStates);
     if (fields.paymentModality && data.paymentModality) fields.paymentModality.setValue(data.paymentModality);
     if (fields.totalCof && data.totalCof !== undefined) fields.totalCof.setValue(data.totalCof);
     if (fields.fundedSecurityType && data.fundedSecurityType) fields.fundedSecurityType.setValue(data.fundedSecurityType);

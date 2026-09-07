@@ -627,6 +627,15 @@ select.centered-input { text-align: center; text-align-last: center; }
 .month-box.locked { cursor: default; }
 .month-box.locked:hover { border-color: var(--mb-paid-bd); filter: none; }
 .month-box.locked .mb-lbl::after { content: ' \1F512'; opacity: 0.75; }
+/* Outside this grid's remit — in Customized, a month governed by a layer that is not the
+   split type. Inert: no status colour, no hover, no click. */
+.month-box.disabled {
+  cursor: default;
+  opacity: 0.4;
+  background: transparent;
+  border-style: dashed;
+}
+.month-box.disabled:hover { border-color: var(--mb-accrue-bd); filter: none; }
 /* "Interest will be capitalized" toggle under the moratorium month boxes */
 /* Moratorium interest mode: "Interest will be paid" / "Interest will be capitalized"
    (mutually exclusive) + an info icon, on one line under the month boxes. */

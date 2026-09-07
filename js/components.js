@@ -1,5 +1,5 @@
 // Reusable UI component builders (returns DOM nodes)
-import { attachCommaFormatter, sanitizeDecimalString, formatTwoDecimalsOnBlur } from './formatting.js?v=20260908a';
+import { attachCommaFormatter, sanitizeDecimalString, formatTwoDecimalsOnBlur } from './formatting.js?v=20260908c';
 
 let uid = 0;
 const nextId = () => `f${++uid}`;
@@ -419,8 +419,11 @@ export function formatDDMMMYYYY(d) {
 //                    later edits to tenor or frequency.
 //   groupByYear   -> lay the boxes out in rows of 12 under Year 01, Year 02, ... so a long
 //                    tenor stays readable.
+//   disabledFn(i) -> true if month i+1 is outside this grid's remit (in Customized, a month
+//                    governed by a layer that is not the split type). Rendered inert and
+//                    greyed, never clickable, and its state is meaningless.
 export function monthBoxesField({ name, getCount, tooltip = '', label = '', selectAll = true, capitalizable = false,
-                                  lockedFn = null, defaultFn = null, groupByYear = false }) {
+                                  lockedFn = null, defaultFn = null, groupByYear = false, disabledFn = null }) {
   const wrapper = el('div', { class: 'field' });
   let states = []; // per month: 0 = none (accrue), 1 = paid, 2 = capitalized
   const touched = new Set(); // months the RM clicked — these survive a defaults refill
@@ -472,6 +475,7 @@ export function monthBoxesField({ name, getCount, tooltip = '', label = '', sele
   function render() {
     const n = Math.max(0, getCount() || 0);
     states = Array.from({ length: n }, (_, i) => {
+      if (disabledFn && disabledFn(i)) return 0;
       if (lockedFn && lockedFn(i)) return 1;                       // principal month: always Paid
       if (defaultFn && !touched.has(i)) return Math.min(defaultFn(i), maxState);
       return Math.min(Number(states[i]) || 0, maxState);
@@ -490,17 +494,19 @@ export function monthBoxesField({ name, getCount, tooltip = '', label = '', sele
         yr.appendChild(cursor);
         grid.appendChild(yr);
       }
-      const locked = !!(lockedFn && lockedFn(i));
-      const cls = CLS[states[i]] || '';
+      const off = !!(disabledFn && disabledFn(i));
+      const locked = !off && !!(lockedFn && lockedFn(i));
+      const cls = off ? '' : (CLS[states[i]] || '');
       const box = el('div', {
-        class: 'month-box' + (cls ? ' ' + cls : '') + (locked ? ' locked' : ''),
+        class: 'month-box' + (cls ? ' ' + cls : '') + (locked ? ' locked' : '') + (off ? ' disabled' : ''),
         'data-month': i + 1,
-        title: locked ? 'Principal is paid this month, so its interest is always paid too' : '',
+        title: off ? 'Governed by this month’s payment layer, not by this grid'
+             : locked ? 'Principal is paid this month, so its interest is always paid too' : '',
       },
         el('div', { class: 'mb-num' }, String(i + 1).padStart(2, '0')),
         el('div', { class: 'mb-lbl' }, 'Month'),
       );
-      if (!locked) {
+      if (!locked && !off) {
         box.addEventListener('click', () => {
           touched.add(i);
           states[i] = (states[i] + 1) % (maxState + 1);

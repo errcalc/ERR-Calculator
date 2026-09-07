@@ -235,6 +235,7 @@ export function buildCustomizedSchedule(p) {
     capFlags = [],
     cofRate = 0,
     layers,
+    intFlags = [], // whole-tenor tri-state grid; only split layers read it
   } = p;
 
   const monthlyRate = ratePerYear / 12;
@@ -282,6 +283,64 @@ export function buildCustomizedSchedule(p) {
     const to = L.toInstallment;
     const count = to - from + 1;
     const isLastLayer = (li === sorted.length - 1);
+
+    // ---- Split interest/principal layer ----------------------------------------------
+    // Recognised structurally (both periods set) rather than by label, so the engine stays
+    // independent of the UI wording. The layer's own From month is the anchor for both legs,
+    // so an interest-only prefix is expressed as a separate layer rather than a start-month
+    // field. Same rules as buildSplitSchedule, but amounts size to MATURITY like every other
+    // layer type, letting a layer that ends early hand its balance on.
+    if (L.interestPeriod && L.principalPeriod) {
+      const ppmI = L.interestPeriod, ppmP = L.principalPeriod;
+      const isPrincipalMonth = (m) => ((m - from + 1) % ppmP === 0) || (m === to);
+      // Principal dates this layer's frequency would produce if it ran to MATURITY, maturity
+      // itself included. Sizing against these (not the layer's own span) is what lets a layer
+      // ending early hand its balance to the next one, and counting the maturity stub keeps
+      // the payments equal instead of clearing the balance one period early.
+      const gridDates = principalPaymentMonths(from, tenorMonths, ppmP);
+      const remainingDates = (m) =>
+        gridDates.filter(d => d >= m).length + (gridDates.includes(m) ? 0 : 1);
+      let prevInt = from - 1;
+      for (let m = from; m <= to; m++) {
+        const interest = urpa * monthlyRate;
+        accruedReceivable += interest;
+        const prin = isPrincipalMonth(m);
+        // A principal month always settles its interest; otherwise the grid decides, and
+        // falls back to the interest frequency.
+        const flag = prin ? 'paid'
+          : (intFlags[m - 1] || (((m - from + 1) % ppmI === 0 || m === to) ? 'paid' : 'accrued'));
+
+        let installment = 0, principal = 0, stubOut;
+        if (flag === 'capitalized') {
+          urpa += accruedReceivable; accruedReceivable = 0;
+        } else if (flag === 'paid') {
+          installment = accruedReceivable; accruedReceivable = 0;
+          if (m - prevInt !== ppmI) stubOut = m - prevInt;
+          prevInt = m;
+        }
+        if (prin) {
+          if (isLastLayer && m === to) {
+            principal = urpa;                       // maturity settles the balance
+          } else if (L.customPrincipal) {
+            principal = Math.min(L.customPrincipal, urpa);
+          } else {
+            // Re-divide the live balance across the principal dates still to come before
+            // maturity: equal when nothing perturbs it, self-resizing after a capitalized
+            // month, and only partially amortising when the layer ends early.
+            principal = urpa / remainingDates(m);
+          }
+          installment += principal;
+          urpa = Math.max(0, urpa - principal);
+        }
+        rows.push({
+          sl: m, installment, interest, principal, urpa,
+          interestExpense: urpa * monthlyCof, idpReceivable: accruedReceivable,
+          paymentType: L.paymentType, isPaymentMonth: installment > 0,
+          intFlag: flag, isPrincipalMonth: prin, stubMonths: stubOut,
+        });
+      }
+      continue;
+    }
 
     let pmt = 0;
     // Payment months are LAYER-RELATIVE: the layer's own start month counts as month 1 of its
