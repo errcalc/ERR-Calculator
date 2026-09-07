@@ -373,6 +373,99 @@ export function buildCustomizedSchedule(p) {
 }
 
 // ============================================================
+// Split interest / principal schedules
+// ============================================================
+// The two legs pay on independent calendars. Interest accrues monthly on the outstanding
+// balance; every month is Paid (settle the running accrual in cash), Accrued (carry it to
+// the next Paid month) or Capitalized (fold it into principal at that month's end, so it
+// compounds from there — convention 5). A month carrying a principal payment is always
+// Paid, so the balance can never move inside an unsettled interest stretch.
+
+// Principal payment months: counting from `startMonth` as month 1, one on every multiple of
+// `period`, plus maturity — which always settles whatever principal is left.
+export function principalPaymentMonths(startMonth, tenorMonths, period) {
+  const out = [];
+  for (let m = startMonth; m <= tenorMonths; m++) {
+    if ((m - startMonth + 1) % period === 0) out.push(m);
+  }
+  if (out[out.length - 1] !== tenorMonths && tenorMonths >= startMonth) out.push(tenorMonths);
+  return out;
+}
+
+// Default interest treatment for a month, before any per-month override from the grid.
+// Principal months are forced Paid; otherwise the frequency decides, counting from month 1.
+function defaultIntFlag(m, interestPeriod, principalSet, tenorMonths) {
+  if (principalSet.has(m) || m === tenorMonths) return 'paid';
+  return (m % interestPeriod === 0) ? 'paid' : 'accrued';
+}
+
+export function buildSplitSchedule(p) {
+  const {
+    loanAmount, ratePerYear, tenorMonths,
+    interestPeriod = 1,        // months per interest period: 1 / 3 / 6 / 12
+    principalPeriod = 1,       // months per principal period: 1 / 3 / 6 / 12
+    principalStartMonth = 1,   // where the principal frequency starts counting
+    principalBasis = 'fixed',  // 'fixed' (equal) | 'custom' (one amount per date)
+    customPrincipals = [],     // used when principalBasis === 'custom'
+    intFlags = [],             // per-month override: 'paid' | 'accrued' | 'capitalized'
+    cofRate = 0,
+  } = p;
+
+  const monthlyRate = ratePerYear / 12;
+  const monthlyCof = cofRate / 12;
+  const pMonths = principalPaymentMonths(principalStartMonth, tenorMonths, principalPeriod);
+  const pSet = new Set(pMonths);
+
+  const rows = [{ sl: 0, installment: 0, interest: 0, principal: 0, urpa: loanAmount, interestExpense: 0, idpReceivable: 0 }];
+  let urpa = loanAmount;
+  let accruedReceivable = 0;
+  let paidIdx = 0;
+
+  for (let m = 1; m <= tenorMonths; m++) {
+    // Interest first, then principal — so the month's interest is always on the opening balance.
+    const interest = urpa * monthlyRate;
+    accruedReceivable += interest;
+    const flag = pSet.has(m) ? 'paid'
+      : (intFlags[m - 1] || defaultIntFlag(m, interestPeriod, pSet, tenorMonths));
+
+    let installment = 0, principal = 0;
+    if (flag === 'capitalized') {
+      urpa += accruedReceivable;          // compounds from here (convention 5)
+      accruedReceivable = 0;
+    } else if (flag === 'paid') {
+      installment = accruedReceivable;
+      accruedReceivable = 0;
+    }
+
+    if (pSet.has(m)) {
+      const remaining = pMonths.length - paidIdx;
+      if (m === tenorMonths) {
+        principal = urpa;                 // maturity settles the balance, whatever it is
+      } else if (principalBasis === 'custom') {
+        principal = Math.min(customPrincipals[paidIdx] || 0, urpa);
+      } else {
+        // Fixed: re-divide the live balance across the dates still to come. With nothing
+        // perturbing it this yields identical payments; after a capitalized month it
+        // re-sizes the remainder automatically, which is the behaviour the user specified.
+        principal = urpa / remaining;
+      }
+      installment += principal;
+      urpa = Math.max(0, urpa - principal);
+      paidIdx++;
+    }
+
+    rows.push({
+      sl: m, installment, interest, principal, urpa,
+      interestExpense: urpa * monthlyCof, idpReceivable: accruedReceivable,
+      isPaymentMonth: installment > 0, intFlag: flag, isPrincipalMonth: pSet.has(m),
+    });
+  }
+
+  applyIntExpenseAccrual(rows, monthlyCof);
+  return { rows, accruedReceivable, capitalizedPrincipal: loanAmount, principalMonths: pMonths };
+}
+
+// ============================================================
 // Metrics — keep only what's needed; surface ERR primarily, plus NIM% and NII$
 // ============================================================
 export function computeMetrics(schedule, params) {
