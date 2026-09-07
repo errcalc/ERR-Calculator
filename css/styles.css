@@ -499,6 +499,22 @@ select.centered-input { text-align: center; text-align-last: center; }
 @media (max-width: 600px) {
   .month-boxes { grid-template-columns: repeat(3, 1fr); }
 }
+/* Year-grouped layout — a whole-tenor grid (split interest/principal type) can run to 60+
+   boxes, so it is chunked into years. The container stops being a grid; each year row is. */
+.month-boxes.grouped { display: block; }
+.mb-year + .mb-year { margin-top: 10px; }
+.mb-year-lbl {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-soft);
+  margin-bottom: 4px;
+}
+.month-boxes-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+@media (max-width: 600px) {
+  .month-boxes-row { grid-template-columns: repeat(3, 1fr); }
+}
 /* Moratorium box palette — identical in light and dark mode (one colour per status, deliberately
    not theme-switched): soft light-blue Accrued on near-black text, solid blue Paid and deep-brown
    Capitalized on white text. */
@@ -544,6 +560,9 @@ select.centered-input { text-align: center; text-align-last: center; }
 .mb-all-accrue { background: var(--mb-accrue-bg); border-color: var(--mb-accrue-bd); color: var(--mb-accrue-text); }
 .mb-all-paid { background: var(--mb-paid-bg); border-color: var(--mb-paid-bd); color: #fff; }
 .mb-all-cap { background: var(--mb-cap-bg); border-color: var(--mb-cap-bd); color: #fff; }
+/* Discards manual overrides and refills the grid from the two frequency dropdowns.
+   Neutral on purpose — it produces no single status, so it never reads as "active". */
+.mb-all-reset { background: transparent; border-color: var(--border); color: var(--text-soft); }
 /* Inactive (not the current uniform state) — lowered vibrancy (desaturated, dimmed), no blur;
    hover restores it fully. */
 .mb-all.inactive { opacity: 0.6; filter: saturate(0.3); }
@@ -602,9 +621,12 @@ select.centered-input { text-align: center; text-align-last: center; }
   white-space: nowrap;
 }
 .select-all-toggle input { accent-color: var(--primary); margin: 0; }
-/* Locked (auto-selected) final moratorium month when capitalizing */
+/* Locked month box — the split interest/principal type fixes a principal-payment month at
+   Paid, since interest is always settled where principal is. Keeps the Paid colour (the
+   status is real) but drops every affordance that suggests it can be clicked. */
 .month-box.locked { cursor: default; }
-.month-box.locked:hover { border-color: var(--primary); }
+.month-box.locked:hover { border-color: var(--mb-paid-bd); filter: none; }
+.month-box.locked .mb-lbl::after { content: ' \1F512'; opacity: 0.75; }
 /* "Interest will be capitalized" toggle under the moratorium month boxes */
 /* Moratorium interest mode: "Interest will be paid" / "Interest will be capitalized"
    (mutually exclusive) + an info icon, on one line under the month boxes. */

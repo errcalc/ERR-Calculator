@@ -1,5 +1,5 @@
 // Reusable UI component builders (returns DOM nodes)
-import { attachCommaFormatter, sanitizeDecimalString, formatTwoDecimalsOnBlur } from './formatting.js?v=20260603zzs';
+import { attachCommaFormatter, sanitizeDecimalString, formatTwoDecimalsOnBlur } from './formatting.js?v=20260908a';
 
 let uid = 0;
 const nextId = () => `f${++uid}`;
@@ -410,9 +410,20 @@ export function formatDDMMMYYYY(d) {
 
 // Month boxes — click each box to cycle its state: none (accrue) → paid → capitalized.
 // Optional bulk-action buttons (set all to one state / clear) + a colour legend.
-export function monthBoxesField({ name, getCount, tooltip = '', label = '', selectAll = true, capitalizable = false }) {
+// Optional extras (all inert when omitted, so the moratorium usage is unchanged):
+//   lockedFn(i)   -> true if month i+1 is fixed at Paid and cannot be clicked. Used by the
+//                    split interest/principal type, where a principal-payment month always
+//                    settles its interest.
+//   defaultFn(i)  -> the state month i+1 takes when the RM has not clicked it. Lets the
+//                    frequency dropdowns pre-fill the grid while manual overrides survive
+//                    later edits to tenor or frequency.
+//   groupByYear   -> lay the boxes out in rows of 12 under Year 01, Year 02, ... so a long
+//                    tenor stays readable.
+export function monthBoxesField({ name, getCount, tooltip = '', label = '', selectAll = true, capitalizable = false,
+                                  lockedFn = null, defaultFn = null, groupByYear = false }) {
   const wrapper = el('div', { class: 'field' });
   let states = []; // per month: 0 = none (accrue), 1 = paid, 2 = capitalized
+  const touched = new Set(); // months the RM clicked — these survive a defaults refill
   const maxState = capitalizable ? 2 : 1;
   if (label) {
     const head = el('div', { class: 'label-row' });
@@ -425,13 +436,25 @@ export function monthBoxesField({ name, getCount, tooltip = '', label = '', sele
   // Bulk-action buttons (right-aligned) — set every box to one state. The button whose state
   // matches ALL the boxes stays sharp; the other two blur. A manual mix of states blurs all
   // three, signalling that none is currently active.
-  const setAll = (v) => { states = states.map(() => Math.min(v, maxState)); render(); };
+  const setAll = (v) => {
+    states = states.map((_, i) => (lockedFn && lockedFn(i)) ? 1 : Math.min(v, maxState));
+    // A bulk choice is a deliberate override, so it outranks the frequency defaults.
+    states.forEach((_, i) => touched.add(i));
+    render();
+  };
   const bulkBtns = {};
   if (selectAll && capitalizable) {
     bulkBtns[0] = el('button', { type: 'button', class: 'mb-all mb-all-accrue', onclick: () => setAll(0) }, 'All to be Accrued');
     bulkBtns[1] = el('button', { type: 'button', class: 'mb-all mb-all-paid', onclick: () => setAll(1) }, 'All to be Paid');
     bulkBtns[2] = el('button', { type: 'button', class: 'mb-all mb-all-cap', onclick: () => setAll(2) }, 'All to be Capitalized');
-    wrapper.appendChild(el('div', { class: 'mora-bulk' }, bulkBtns[0], bulkBtns[1], bulkBtns[2]));
+    const bulk = el('div', { class: 'mora-bulk' }, bulkBtns[0], bulkBtns[1], bulkBtns[2]);
+    // Only meaningful when the frequency drives a default fill — lets the RM discard their
+    // manual overrides and go back to what the two frequency dropdowns imply.
+    if (defaultFn) {
+      bulk.appendChild(el('button', { type: 'button', class: 'mb-all mb-all-reset',
+        onclick: () => { touched.clear(); render(); } }, 'Reset to Frequency'));
+    }
+    wrapper.appendChild(bulk);
   }
 
   const grid = el('div', { class: 'month-boxes', 'data-name': name });
@@ -448,19 +471,43 @@ export function monthBoxesField({ name, getCount, tooltip = '', label = '', sele
   const CLS = { 1: 'paid', 2: 'capitalized' };
   function render() {
     const n = Math.max(0, getCount() || 0);
-    states = Array.from({ length: n }, (_, i) => Math.min(Number(states[i]) || 0, maxState));
+    states = Array.from({ length: n }, (_, i) => {
+      if (lockedFn && lockedFn(i)) return 1;                       // principal month: always Paid
+      if (defaultFn && !touched.has(i)) return Math.min(defaultFn(i), maxState);
+      return Math.min(Number(states[i]) || 0, maxState);
+    });
     grid.innerHTML = '';
+    // Long tenors are chunked into years so the row stays scannable; the moratorium usage
+    // (short, ungrouped) keeps its single flat row.
+    const perRow = (groupByYear && n > 12) ? 12 : n;
+    grid.classList.toggle('grouped', perRow < n);
+    let cursor = null;
     for (let i = 0; i < n; i++) {
+      if (perRow < n && i % perRow === 0) {
+        const yr = el('div', { class: 'mb-year' },
+          el('div', { class: 'mb-year-lbl' }, `Year ${String(i / perRow + 1).padStart(2, '0')}`));
+        cursor = el('div', { class: 'month-boxes-row' });
+        yr.appendChild(cursor);
+        grid.appendChild(yr);
+      }
+      const locked = !!(lockedFn && lockedFn(i));
       const cls = CLS[states[i]] || '';
-      const box = el('div', { class: 'month-box' + (cls ? ' ' + cls : ''), 'data-month': i + 1 },
+      const box = el('div', {
+        class: 'month-box' + (cls ? ' ' + cls : '') + (locked ? ' locked' : ''),
+        'data-month': i + 1,
+        title: locked ? 'Principal is paid this month, so its interest is always paid too' : '',
+      },
         el('div', { class: 'mb-num' }, String(i + 1).padStart(2, '0')),
         el('div', { class: 'mb-lbl' }, 'Month'),
       );
-      box.addEventListener('click', () => {
-        states[i] = (states[i] + 1) % (maxState + 1);
-        render();
-      });
-      grid.appendChild(box);
+      if (!locked) {
+        box.addEventListener('click', () => {
+          touched.add(i);
+          states[i] = (states[i] + 1) % (maxState + 1);
+          render();
+        });
+      }
+      (cursor || grid).appendChild(box);
     }
     updateBulkActive();
   }
@@ -469,10 +516,24 @@ export function monthBoxesField({ name, getCount, tooltip = '', label = '', sele
   wrapper.getValue = () => states.slice();
   wrapper.setValue = (arr) => {
     states = (arr || []).map(v => v === true ? 1 : v === false ? 0 : Math.min(Number(v) || 0, maxState));
+    // Only months that DIFFER from the default were real overrides — mark just those, so a
+    // draft saved while the grid sat at its defaults doesn't freeze it. Marking everything
+    // would make a later frequency change silently do nothing to the restored months.
+    touched.clear();
+    if (defaultFn) {
+      states.forEach((s, i) => {
+        if (lockedFn && lockedFn(i)) return;
+        if (s !== Math.min(defaultFn(i), maxState)) touched.add(i);
+      });
+    } else {
+      states.forEach((_, i) => touched.add(i));
+    }
     render();
   };
   wrapper.getPaidFlags = () => states.map(s => s === 1);
   wrapper.getCapFlags = () => states.map(s => s === 2);
+  // 'paid' | 'accrued' | 'capitalized' — the shape buildSplitSchedule expects.
+  wrapper.getIntFlags = () => states.map(s => s === 2 ? 'capitalized' : s === 1 ? 'paid' : 'accrued');
   render();
   return wrapper;
 }
