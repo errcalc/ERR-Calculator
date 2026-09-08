@@ -3,23 +3,23 @@ import {
   el, numberField, percentField, optionField, dateField, textField,
   monthBoxesField, layeredField, securityLayersField, rateLayersField, toast, parseDDMMMYYYY, formatDDMMMYYYY,
   openModal, closeModal,
-} from './components.js?v=20260908d';
-import { isoToDDMMMYYYY } from './formatting.js?v=20260908d';
+} from './components.js?v=20260908g';
+import { isoToDDMMMYYYY } from './formatting.js?v=20260908g';
 import {
   buildStructuredSchedule, buildCustomizedSchedule,
   buildRateRevisionStructured, computeMetrics,
-  buildSplitSchedule, principalPaymentMonths,
+  buildSplitSchedule, principalPaymentMonths, SPLIT_MODE, FREQ, FREQ_NAMES,
   computeRevisionMetrics, computeRevisionCustomizedMetrics, buildCofData,
   addMonthsDue,
-} from './calculations.js?v=20260908d';
-import { formatMoney, formatPercent, formatNumber } from './formatting.js?v=20260908d';
-import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20260908d';
+} from './calculations.js?v=20260908g';
+import { formatMoney, formatPercent, formatNumber } from './formatting.js?v=20260908g';
+import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20260908g';
 import {
   downloadScheduleAsExcel, downloadSampleAmortization, readUploadedSchedule,
   downloadScheduleAsWord, downloadScheduleAsPDF, downloadVerificationExcel, downloadReportPDF,
   downloadCofSample, readUploadedCof,
   downloadCustomizedRevisionSample, readCustomizedRevisionFile,
-} from './excel.js?v=20260908d';
+} from './excel.js?v=20260908g';
 
 // Cached page state by tab key (also persisted via storage saveDraft)
 const tabState = {};
@@ -28,12 +28,6 @@ const tabState = {};
 // The secondary part stays inline on desktop (reads as one line, unchanged look) and
 // drops onto its own line on mobile (CSS .lbl-line2). Forcing both paired fields to a
 // matching two-line height keeps their input boxes aligned on the same row.
-// Split interest/principal payment type. The two legs pay on independent calendars, so no
-// level installment exists — EMI/EQI cannot express it. Placeholder label; rename freely.
-const SPLIT_MODE = 'Interest & Principal (Separate Frequency)';
-const FREQ = { Monthly: 1, Quarterly: 3, 'Half-yearly': 6, Yearly: 12 };
-const FREQ_NAMES = Object.keys(FREQ);
-
 function setTwoLineLabel(field, line1, line2) {
   const lbl = field.querySelector('label');
   if (!lbl) return;

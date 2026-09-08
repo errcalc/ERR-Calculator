@@ -1,6 +1,13 @@
 // Core financial math + amortization + ERR engine
 // All rates passed as decimals (0.12 = 12%). Periodic = monthly unless stated.
 
+// Label and frequency table for the split interest/principal type. The schedule builders key
+// on structure (interestPeriod && principalPeriod), never on this string — it exists so the UI
+// and the Excel/PDF writers agree on one spelling and one set of period lengths.
+export const SPLIT_MODE = 'Interest & Principal (Separate Frequency)';
+export const FREQ = { Monthly: 1, Quarterly: 3, 'Half-yearly': 6, Yearly: 12 };
+export const FREQ_NAMES = Object.keys(FREQ);
+
 export function PMT(rate, nper, pv, fv = 0, type = 0) {
   if (rate === 0) return -(pv + fv) / nper;
   const pvif = Math.pow(1 + rate, nper);

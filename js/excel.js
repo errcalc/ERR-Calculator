@@ -1,5 +1,25 @@
 // Excel / Word / PDF I/O via CDN libs
-import { formatMoney as fmtM, formatPercent as fmtP } from './formatting.js?v=20260908d';
+import { formatMoney as fmtM, formatPercent as fmtP } from './formatting.js?v=20260908g';
+import { SPLIT_MODE } from './calculations.js?v=20260908g';
+
+// True when this calculation uses the split interest/principal type, on any of the three pages.
+function isSplitCtx(inp) {
+  return inp.paymentMode === SPLIT_MODE
+      || inp.paymentModality === SPLIT_MODE
+      || (Array.isArray(inp.paymentLayers) && inp.paymentLayers.some(L => L.paymentType === SPLIT_MODE));
+}
+// The frequency/basis lines that replace the moratorium lines for this type. On Customized the
+// settings live per layer, so they are summarised in the Payment Layers line instead.
+function splitInputLines(inp, prefix) {
+  const iF = inp[prefix + 'IntFreq'] || inp.intFreq, pF = inp[prefix + 'PrinFreq'] || inp.prinFreq;
+  const st = inp[prefix + 'PrinStart'] || inp.prinStart, bs = inp[prefix + 'PrinBasis'] || inp.prinBasis;
+  return [
+    ['Interest Payment Frequency', iF || ''],
+    ['Principal Payment Frequency', pF || ''],
+    ['Principal Payments Start From Month', st || 1],
+    ['Principal Amount', bs || ''],
+  ];
+}
 
 // Round a cell value to 2 decimals (numeric — kept distinct from fmtM which returns a string).
 function num(v) {
@@ -282,6 +302,24 @@ export function downloadVerificationExcel(filename, ctx) {
     });
   }
 
+  // Split rows, Fixed basis: principal = balance / (principal dates still to come, this one
+  // included). Counting from the engine's own rows keeps the sheet and the app in lockstep.
+  // A Customized split LAYER sizes against the dates its frequency would produce if it ran to
+  // maturity, which is not the same count as the rows actually present. So every candidate
+  // divisor is checked against the engine's own number and only emitted when it reproduces it;
+  // otherwise the row falls back to the engine value. The sheet never disagrees with the app.
+  const splitDivisorBySl = {};
+  {
+    const pRows = schedule.rows.filter(r => r.isPrincipalMonth);
+    const pMonths = pRows.map(r => r.sl);
+    pRows.forEach((r) => {
+      const idx = schedule.rows.indexOf(r);
+      const prevUrpa = idx > 0 ? (schedule.rows[idx - 1].urpa || 0) : 0;
+      const div = pMonths.filter(x => x >= r.sl).length;
+      if (div > 0 && Math.abs(prevUrpa / div - (r.principal || 0)) < 0.01) splitDivisorBySl[r.sl] = div;
+    });
+  }
+
   schedule.rows.forEach((r, i) => {
     const xr = i + 2; // 1-indexed Excel row
     const pr = xr - 1; // previous-row Excel index
@@ -300,16 +338,19 @@ export function downloadVerificationExcel(filename, ctx) {
     }
 
     const isPaymentRow = (r.installment || 0) > 0;
-    const isQuarterly = r.paymentType === 'EQI' || r.paymentType === 'Equal Principal + Interest (Quarterly)' || r.paymentType === 'Customized Principal (Quarterly)';
+    // Split interest/principal rows carry their own tri-state flag; interest ALWAYS accrues
+    // monthly on the prior balance, so no quarterly divisor and no maturity stub applies.
+    const isSplitRow = !!r.intFlag;
+    const isQuarterly = !isSplitRow && (r.paymentType === 'EQI' || r.paymentType === 'Equal Principal + Interest (Quarterly)' || r.paymentType === 'Customized Principal (Quarterly)');
     const isEPI = r.paymentType === 'Equal Principal + Interest (Monthly)' || r.paymentType === 'Equal Principal + Interest (Quarterly)';
     const divisor = (isQuarterly && r.interest > 0) ? 4 : 12;
 
     // Interest (C) = URPA_prev * Rate / (12 or 4). Always a formula when a rate input exists.
     // Maturity stub (quarterly grid short of maturity) accrues nominal months: Rate*(1 or 2)/12.
     if (RATE_REF && r.interest > 0) {
-      const intFormula = r.stubMonths
+      const intFormula = (r.stubMonths && !isSplitRow)
         ? `E${pr}*${RATE_REF}${r.stubMonths === 2 ? '*2' : ''}/12`
-        : `E${pr}*${RATE_REF}/${divisor}`;
+        : `E${pr}*${RATE_REF}/${isSplitRow ? 12 : divisor}`;
       setCell(wsSched, `C${xr}`, 0, { f: intFormula, z: FMT.ACCOUNTING });
     } else {
       setCell(wsSched, `C${xr}`, num(r.interest), { z: FMT.ACCOUNTING });
@@ -318,7 +359,15 @@ export function downloadVerificationExcel(filename, ctx) {
     // Principal (D) — independent of accrued interest (the previous B-C formula leaked accrued
     // into principal). Equal-Principal: constant = balance / number-of-payment-periods.
     const epiLayer = epiLayerBySl[r.sl];
-    if (!isPaymentRow || !(r.principal > 0)) {
+    if (isSplitRow) {
+      // Fixed basis re-divides the live balance across the principal dates still to come, so
+      // the divisor is a plain count and the whole thing stays traceable from E{prev}.
+      const div = splitDivisorBySl[r.sl];
+      if (!(r.principal > 0)) setCell(wsSched, `D${xr}`, 0, { z: FMT.ACCOUNTING });
+      else if (div === 1) setCell(wsSched, `D${xr}`, 0, { f: `E${pr}`, z: FMT.ACCOUNTING });
+      else if (div) setCell(wsSched, `D${xr}`, 0, { f: `E${pr}/${div}`, z: FMT.ACCOUNTING });
+      else setCell(wsSched, `D${xr}`, num(r.principal), { z: FMT.ACCOUNTING });
+    } else if (!isPaymentRow || !(r.principal > 0)) {
       setCell(wsSched, `D${xr}`, num(r.principal || 0), { z: FMT.ACCOUNTING });
     } else if (isEPI && epiCapable && !capitalize) {
       // Structured: one EPI stream over the whole regular tenor.
@@ -344,7 +393,10 @@ export function downloadVerificationExcel(filename, ctx) {
 
     // URPA (E) = URPA_prev - Principal. Under capitalization the outstanding grows during
     // the moratorium, so use the engine value on those rows (guaranteed to match the app).
-    if (capitalize && r.sl >= 1 && r.sl <= mora) {
+    if (isSplitRow && r.intFlag === 'capitalized') {
+      // Capitalized: this month's interest plus everything carried joins the principal.
+      setCell(wsSched, `E${xr}`, 0, { f: `E${pr}+G${pr}+C${xr}-D${xr}`, z: FMT.ACCOUNTING });
+    } else if (!isSplitRow && capitalize && r.sl >= 1 && r.sl <= mora) {
       setCell(wsSched, `E${xr}`, num(r.urpa), { z: FMT.ACCOUNTING });
     } else {
       setCell(wsSched, `E${xr}`, 0, { f: `E${pr}-D${xr}`, z: FMT.ACCOUNTING });
@@ -357,8 +409,15 @@ export function downloadVerificationExcel(filename, ctx) {
       setCell(wsSched, `F${xr}`, num(r.interestExpense || 0), { z: FMT.ACCOUNTING });
     }
 
-    // Accrued Interest (G) — the running unpaid-interest balance from the engine
-    setCell(wsSched, `G${xr}`, num(r.idpReceivable || 0), { z: FMT.ACCOUNTING });
+    // Accrued Interest (G) — the running unpaid-interest balance. For split rows it is a
+    // formula: cleared when the month is Paid or Capitalized, else last month's carry + C.
+    if (isSplitRow) {
+      const cleared = r.intFlag === 'paid' || r.intFlag === 'capitalized';
+      if (cleared) setCell(wsSched, `G${xr}`, 0, { z: FMT.ACCOUNTING });
+      else setCell(wsSched, `G${xr}`, 0, { f: `G${pr}+C${xr}`, z: FMT.ACCOUNTING });
+    } else {
+      setCell(wsSched, `G${xr}`, num(r.idpReceivable || 0), { z: FMT.ACCOUNTING });
+    }
   });
   const lastDataRow = schedule.rows.length + 1; // 1-indexed last data row
   const totalRowIdx = schedule.rows.length + 1; // 0-indexed for setCell
@@ -616,6 +675,13 @@ function downloadRevisionStructuredVerify(filename, ctx) {
   const secAmtCell = (d) => { const n = secActive(d); return n ? `${LAYER}!$K$${3 + n - 1}` : null; };
   const secRateCell = (d) => { const n = secActive(d); return n ? `${LAYER}!$L$${3 + n - 1}` : null; };
 
+  // The split modality has no moratorium, so its own four settings take those two rows' place
+  // on the Inputs sheet. That makes the list length vary, so the tenor cell the Schedule
+  // formulas quote is derived from it rather than hardcoded — values sit in column D from
+  // row 5, and the tenor is always the last input row.
+  const rrSplit = inputs.paymentModality === SPLIT_MODE;
+  const TENOR_CELL = `'Inputs & Results'!$D$${5 + (rrSplit ? 8 : 6) - 1}`;
+
   // ----- Schedule sheet -----
   const heads = ['Sl.', 'Date', 'Installment', 'Interest', 'Principal', 'URPA',
                  'Total COF', 'Int. Expense (URPA*COF/12)', 'Accrued Interest', 'Loan Security Balance', 'Loan Security Benefit',
@@ -662,6 +728,20 @@ function downloadRevisionStructuredVerify(filename, ctx) {
     }).join('+');
   };
 
+  // Split type, Fixed basis: principal = balance / (principal dates still to come). Emitted
+  // only where it reproduces the engine's own figure, so the sheet can never disagree.
+  const rrSplitDivisorBySl = {};
+  {
+    const pRows = rows.filter(r => r.isPrincipalMonth);
+    const pMonths = pRows.map(r => r.sl);
+    pRows.forEach((r) => {
+      const idx = rows.indexOf(r);
+      const prevUrpa = idx > 0 ? (rows[idx - 1].urpa || 0) : 0;
+      const div = pMonths.filter(x => x >= r.sl).length;
+      if (div > 0 && Math.abs(prevUrpa / div - (r.principal || 0)) < 0.01) rrSplitDivisorBySl[r.sl] = div;
+    });
+  }
+
   let eqpPrevPayRow = null; // Excel row of the previous Equal-Principal payment (quarterly chains =E(prev))
   let chainPayXr = null, chainRate = null; // annuity chaining after a goal-sought split payment
   rows.forEach((r, i) => {
@@ -692,6 +772,10 @@ function downloadRevisionStructuredVerify(filename, ctx) {
     const accrualStart = rows[i - 1].date; // accrual period starts on the previous row's date
     if (r.splitSegments) {
       setCell(ws, `D${xr}`, 0, { f: splitDFormula(r, xr), z: FMT.ACCOUNTING });
+    } else if (r.intFlag) {
+      // Split type: interest accrues MONTHLY on the prior balance in every month, whether or
+      // not it is settled this month — so no quarterly divisor and no stub multiplier.
+      setCell(ws, `D${xr}`, 0, { f: `F${pr}*${lendCell(accrualStart)}/12`, z: FMT.ACCOUNTING });
     } else if (isMora) {
       setCell(ws, `D${xr}`, 0, { f: `F${pr}*${lendCell(accrualStart)}/12`, z: FMT.ACCOUNTING });
     } else if (isPaymentRow && r.stubMonths) {
@@ -703,7 +787,18 @@ function downloadRevisionStructuredVerify(filename, ctx) {
     }
 
     // C Installment & E Principal
-    if (isMora) {
+    if (r.intFlag) {
+      // Principal only on principal months; Fixed basis divides the prior balance by the
+      // dates still to come (validated against the engine, else written as a value).
+      const div = rrSplitDivisorBySl[r.sl];
+      if (!(r.principal > 0)) setCell(ws, `E${xr}`, 0, { z: FMT.ACCOUNTING });
+      else if (div === 1) setCell(ws, `E${xr}`, 0, { f: `F${pr}`, z: FMT.ACCOUNTING });
+      else if (div) setCell(ws, `E${xr}`, 0, { f: `F${pr}/${div}`, z: FMT.ACCOUNTING });
+      else setCell(ws, `E${xr}`, num(r.principal), { z: FMT.ACCOUNTING });
+      // Paid months settle this month's interest plus everything carried; otherwise no cash.
+      if (r.intFlag === 'paid') setCell(ws, `C${xr}`, 0, { f: `D${xr}+E${xr}+I${pr}`, z: FMT.ACCOUNTING });
+      else setCell(ws, `C${xr}`, 0, { z: FMT.ACCOUNTING });
+    } else if (isMora) {
       // paid month: C = D + E + accrued_prev (E=0). unpaid: C=0.
       if (isPaymentRow) setCell(ws, `C${xr}`, 0, { f: `D${xr}+E${xr}+I${pr}`, z: FMT.ACCOUNTING });
       else setCell(ws, `C${xr}`, 0, { z: FMT.ACCOUNTING });
@@ -734,8 +829,8 @@ function downloadRevisionStructuredVerify(filename, ctx) {
       // Quarterly: payments required to COVER the remaining period (phantom final quarter
       // when the tenor doesn't divide evenly) = ROUNDUP((tenor - blockStartSl + 1 + 2)/3).
       const periodsExpr = ppyDiv === 12
-        ? `'Inputs & Results'!$D$10-Schedule!$A$${bRow}`
-        : `ROUNDUP(('Inputs & Results'!$D$10-Schedule!$A$${bRow}+2)/3,0)`;
+        ? `${TENOR_CELL}-Schedule!$A$${bRow}`
+        : `ROUNDUP((${TENOR_CELL}-Schedule!$A$${bRow}+2)/3,0)`;
       const pmt = `PMT(${lendCell(accrualStart)}/${ppyDiv},${periodsExpr},-Schedule!$F$${bRow},,0)`;
       setCell(ws, `C${xr}`, 0, { f: `${pmt}+I${pr}`, z: FMT.ACCOUNTING });
       setCell(ws, `E${xr}`, 0, { f: `C${xr}-D${xr}`, z: FMT.ACCOUNTING });
@@ -744,9 +839,9 @@ function downloadRevisionStructuredVerify(filename, ctx) {
       // Monthly repeats the absolute formula every row; quarterly seeds the first payment then chains
       // =E(prevQuarter). Installment = Interest + Principal + Accrued_prev. Matches rectified EMPP/EQPP.
       if (ppyDiv === 12) {
-        setCell(ws, `E${xr}`, 0, { f: `$F$${moraRow}/('Inputs & Results'!$D$10-Schedule!$A$${moraRow})`, z: FMT.ACCOUNTING });
+        setCell(ws, `E${xr}`, 0, { f: `$F$${moraRow}/(${TENOR_CELL}-Schedule!$A$${moraRow})`, z: FMT.ACCOUNTING });
       } else if (eqpPrevPayRow === null) {
-        setCell(ws, `E${xr}`, 0, { f: `$F$${afterMoraRow}/('Inputs & Results'!$D$10-Schedule!$A$${moraRow})*3`, z: FMT.ACCOUNTING });
+        setCell(ws, `E${xr}`, 0, { f: `$F$${afterMoraRow}/(${TENOR_CELL}-Schedule!$A$${moraRow})*3`, z: FMT.ACCOUNTING });
       } else {
         setCell(ws, `E${xr}`, 0, { f: `E${eqpPrevPayRow}`, z: FMT.ACCOUNTING });
       }
@@ -759,7 +854,10 @@ function downloadRevisionStructuredVerify(filename, ctx) {
 
     // F URPA = URPA_prev - Principal. Under capitalization the outstanding grows during
     // the moratorium, so use the engine value on those rows.
-    if (capitalize && r.sl >= 1 && r.sl <= mora) {
+    if (r.intFlag === 'capitalized') {
+      // Capitalized: this month's interest plus everything carried joins the principal.
+      setCell(ws, `F${xr}`, 0, { f: `F${pr}+I${pr}+D${xr}-E${xr}`, z: FMT.ACCOUNTING });
+    } else if (!r.intFlag && capitalize && r.sl >= 1 && r.sl <= mora) {
       setCell(ws, `F${xr}`, num(r.urpa), { z: FMT.ACCOUNTING });
     } else {
       setCell(ws, `F${xr}`, 0, { f: `F${pr}-E${xr}`, z: FMT.ACCOUNTING });
@@ -767,8 +865,15 @@ function downloadRevisionStructuredVerify(filename, ctx) {
     // G Total COF (Eligible COF referenced from the COF table by date); H Int Expense = prev URPA * prev COF / 12
     setCell(ws, `G${xr}`, 0, { f: cofCell(r.date), z: FMT.PCT2 });
     setCell(ws, `H${xr}`, 0, { f: `F${pr}*G${pr}/12`, z: FMT.ACCOUNTING });
-    // I Accrued
-    setCell(ws, `I${xr}`, num(r.idpReceivable || 0), { z: FMT.ACCOUNTING });
+    // I Accrued — a formula for split rows so the carry is auditable: cleared when the month
+    // is Paid or Capitalized, else last month's carry plus this month's interest.
+    if (r.intFlag) {
+      const cleared = r.intFlag === 'paid' || r.intFlag === 'capitalized';
+      if (cleared) setCell(ws, `I${xr}`, 0, { z: FMT.ACCOUNTING });
+      else setCell(ws, `I${xr}`, 0, { f: `I${pr}+D${xr}`, z: FMT.ACCOUNTING });
+    } else {
+      setCell(ws, `I${xr}`, num(r.idpReceivable || 0), { z: FMT.ACCOUNTING });
+    }
     // J Loan Security Balance (cumulative amount active by the date; released to 0 at maturity);
     // K Loan Security Benefit = PRIOR row balance*(COF − weighted-avg security rate)/12 (one-month lag)
     const isLast = i === rows.length - 1;
@@ -834,11 +939,19 @@ function downloadRevisionStructuredVerify(filename, ctx) {
   const inputRows = [
     ['Initial Loan Amount', inputs.initialAmount ?? 0, 'num'],
     ['Disbursement Date', inputs.disbursementDate ?? '', 'date'],
-    ['Moratorium Given at Disbursement?', moraYes ? 'Yes' : 'No', 'text'],
-    ['Moratorium Period (Months)', inputs.moratoriumPeriod ?? 0, 'int'],
+    ...(rrSplit ? [
+      ['Interest Payment Frequency', inputs.rrIntFreq ?? '', 'text'],
+      ['Principal Payment Frequency', inputs.rrPrinFreq ?? '', 'text'],
+      ['Principal Payments Start From Month', inputs.rrPrinStart ?? 1, 'int'],
+      ['Principal Amount', inputs.rrPrinBasis ?? '', 'text'],
+    ] : [
+      ['Moratorium Given at Disbursement?', moraYes ? 'Yes' : 'No', 'text'],
+      ['Moratorium Period (Months)', inputs.moratoriumPeriod ?? 0, 'int'],
+    ]),
     [moraYes ? 'Payment Modality after Moratorium Period' : 'Payment Modality', inputs.paymentModality ?? '', 'text'],
     ['Loan Tenor including Moratorium at Disbursement (Months)', inputs.tenorMonths ?? 0, 'int'],
   ];
+
   inputRows.forEach(([label, value, kind], i) => {
     const r = 5 + i;
     setCell(wsI, `A${r}`, label, { text: true, s: RR_STYLE.cell });
@@ -1015,11 +1128,15 @@ function securityAmtFor(inp, key) {
 function collectInputLinesFor(pageType, inp) {
   const yesNo = (v) => (v === 'Yes' || v === true ? 'Yes' : 'No');
   if (pageType === 'regular') {
+    // The split type carries no moratorium fields — a moratorium is expressed in the interest
+    // grid plus a later principal start, so those two lines are replaced by its own settings.
+    const splitLines = isSplitCtx(inp) ? splitInputLines(inp, '') : null;
     return [
       ['Offered Rate', inp.offeredRate ?? 0],
       ['Loan Amount', inp.loanAmount ?? 0],
+      ...(splitLines || [
       ['Moratorium Available?', yesNo(inp.moratoriumAvail)],
-      ['Moratorium Period (Months)', inp.moratoriumPeriod ?? 0],
+      ['Moratorium Period (Months)', inp.moratoriumPeriod ?? 0]]),
       ['Loan Tenor including Moratorium (Months)', inp.loanTenor ?? 0],
       ['Payment Mode', inp.paymentMode ?? ''],
       ['Total COF (COF/ISC + OPEX)', inp.totalCof ?? 0],
@@ -1036,7 +1153,9 @@ function collectInputLinesFor(pageType, inp) {
       ['Moratorium Available?', yesNo(inp.moratoriumAvail)],
       ['Moratorium Period (Months)', inp.moratoriumPeriod ?? 0],
       ['Loan Tenor including Moratorium (Months)', inp.loanTenor ?? 0],
-      ['Payment Layers', (inp.paymentLayers || []).length + ' layer(s)'],
+      ['Payment Layers', (inp.paymentLayers || []).length + ' layer(s)'
+        + ((inp.paymentLayers || []).filter(L => L.paymentType === SPLIT_MODE)
+            .map(L => ` — months ${L.fromInstallment}-${L.toInstallment}: ${L.intFreq} interest / ${L.prinFreq} principal`).join('') || '')],
       ['Total COF (COF/ISC + OPEX)', inp.totalCof ?? 0],
       ['Funded Security Type', inp.fundedSecurityType ?? ''],
       ['Number of Installments (security)', inp.numInst ?? 0],
@@ -1055,8 +1174,9 @@ function collectInputLinesFor(pageType, inp) {
     return [
       ['Initial Loan Amount', inp.initialAmount ?? 0],
       ['Disbursement Date', inp.disbursementDate ?? ''],
+      ...(isSplitCtx(inp) ? splitInputLines(inp, 'rr') : [
       ['Moratorium Given at Disbursement?', yesNo(inp.moratoriumAvail)],
-      ['Moratorium Period (Months)', inp.moratoriumPeriod ?? 0],
+      ['Moratorium Period (Months)', inp.moratoriumPeriod ?? 0]]),
       [moraYes ? 'Payment Modality after Moratorium Period' : 'Payment Modality', inp.paymentModality ?? ''],
       ['Loan Tenor including Moratorium at Disbursement (Months)', inp.tenorMonths ?? 0],
       ['Lending Rate Layers', rateLayersStr],
