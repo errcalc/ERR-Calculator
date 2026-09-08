@@ -3,23 +3,23 @@ import {
   el, numberField, percentField, optionField, dateField, textField,
   monthBoxesField, layeredField, securityLayersField, rateLayersField, toast, parseDDMMMYYYY, formatDDMMMYYYY,
   openModal, closeModal,
-} from './components.js?v=20260908h';
-import { isoToDDMMMYYYY } from './formatting.js?v=20260908h';
+} from './components.js?v=20260908i';
+import { isoToDDMMMYYYY } from './formatting.js?v=20260908i';
 import {
   buildStructuredSchedule, buildCustomizedSchedule,
   buildRateRevisionStructured, computeMetrics,
   buildSplitSchedule, principalPaymentMonths, SPLIT_MODE, FREQ, FREQ_NAMES,
   computeRevisionMetrics, computeRevisionCustomizedMetrics, buildCofData,
   addMonthsDue,
-} from './calculations.js?v=20260908h';
-import { formatMoney, formatPercent, formatNumber } from './formatting.js?v=20260908h';
-import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20260908h';
+} from './calculations.js?v=20260908i';
+import { formatMoney, formatPercent, formatNumber } from './formatting.js?v=20260908i';
+import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20260908i';
 import {
   downloadScheduleAsExcel, downloadSampleAmortization, readUploadedSchedule,
   downloadScheduleAsWord, downloadScheduleAsPDF, downloadVerificationExcel, downloadReportPDF,
   downloadCofSample, readUploadedCof,
   downloadCustomizedRevisionSample, readCustomizedRevisionFile,
-} from './excel.js?v=20260908h';
+} from './excel.js?v=20260908i';
 
 // Cached page state by tab key (also persisted via storage saveDraft)
 const tabState = {};
@@ -28,6 +28,23 @@ const tabState = {};
 // The secondary part stays inline on desktop (reads as one line, unchanged look) and
 // drops onto its own line on mobile (CSS .lbl-line2). Forcing both paired fields to a
 // matching two-line height keeps their input boxes aligned on the same row.
+// Plain-English readout of when principal is actually paid. The "start from" month is where
+// the schedule STARTS COUNTING, so with a quarterly frequency a 1 there means the first
+// payment lands at the end of month 3 — that inference is exactly what confuses people, so
+// the resulting months are spelled out instead of left to be worked out.
+function principalScheduleHint(months, periodMonths) {
+  if (!months || !months.length) return '';
+  const n = months.length;
+  const pad = (m) => String(m).padStart(2, '0');
+  const plural = `${n} payment${n === 1 ? '' : 's'}`;
+  if (n === 1) return `Principal is paid once, at the end of Month ${pad(months[0])}.`;
+  if (periodMonths === 1) return `Principal is paid every month, Month ${pad(months[0])} to Month ${pad(months[n - 1])} — ${plural}.`;
+  const shown = n <= 8 ? months.map(pad).join(', ')
+    : months.slice(0, 6).map(pad).join(', ') + ', … , ' + pad(months[n - 1]);
+  const every = `every ${periodMonths} months`;
+  return `First principal payment at the end of Month ${pad(months[0])}, then ${every} — ${shown} (${plural}).`;
+}
+
 function setTwoLineLabel(field, line1, line2) {
   const lbl = field.querySelector('label');
   if (!lbl) return;
@@ -138,6 +155,8 @@ export function renderRegularLoan(root) {
   setTwoLineLabel(prinStart, 'Principal Payments', 'Start From Month');
   prinStart.setValue(1); // principal normally starts with the loan; a later month = principal grace
   prinStart.input.addEventListener('input', () => refresh());
+  const prinHint = el('span', { class: 'help' });
+  prinStart.appendChild(prinHint);
   const prinBasis = optionField({
     label: 'Principal Amount', name: 'prinBasis',
     options: ['Fixed (Equal)', 'Different per Date'], value: 'Fixed (Equal)', onChange: () => refresh(),
@@ -294,6 +313,7 @@ export function renderRegularLoan(root) {
       prinFreq.classList.toggle('invalid', !ok);
       customWrap.classList.toggle('hidden', prinBasis.getValue() !== 'Different per Date');
       rebuildCustomBoxes();
+      prinHint.textContent = principalScheduleHint(splitPrincipalMonths(), FREQ[prinFreq.getValue()] || 1);
       splitGrid.refresh();
     }
 
@@ -825,6 +845,8 @@ export function renderRateRevisionStructured(root) {
   setTwoLineLabel(rrPrinStart, 'Principal Payments', 'Start From Month');
   rrPrinStart.setValue(1);
   rrPrinStart.input.addEventListener('input', () => refresh());
+  const rrPrinHint = el('span', { class: 'help' });
+  rrPrinStart.appendChild(rrPrinHint);
   const rrPrinBasis = optionField({ label: 'Principal Amount', name: 'rrPrinBasis',
     options: ['Fixed (Equal)', 'Different per Date'], value: 'Fixed (Equal)', onChange: () => refresh() });
 
@@ -964,6 +986,7 @@ export function renderRateRevisionStructured(root) {
       rrPrinFreq.classList.toggle('invalid', !ok);
       rrCustomWrap.classList.toggle('hidden', rrPrinBasis.getValue() !== 'Different per Date');
       rrRebuildCustom();
+      rrPrinHint.textContent = principalScheduleHint(rrPrincipalMonths(), FREQ[rrPrinFreq.getValue()] || 1);
       rrSplitGrid.refresh();
     }
   }
