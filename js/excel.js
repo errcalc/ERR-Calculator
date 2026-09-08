@@ -1,6 +1,6 @@
 // Excel / Word / PDF I/O via CDN libs
-import { formatMoney as fmtM, formatPercent as fmtP } from './formatting.js?v=20260908g';
-import { SPLIT_MODE } from './calculations.js?v=20260908g';
+import { formatMoney as fmtM, formatPercent as fmtP } from './formatting.js?v=20260908h';
+import { SPLIT_MODE } from './calculations.js?v=20260908h';
 
 // True when this calculation uses the split interest/principal type, on any of the three pages.
 function isSplitCtx(inp) {
