@@ -1411,7 +1411,7 @@ table.schedule th {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  text-align: left;
+  text-align: center;
   padding: 22px 20px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
