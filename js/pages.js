@@ -91,14 +91,18 @@ function resetButton(tabKey, rerender, getState = null) {
 // disbursement date, ERR cannot be computed — the earliest months would have no cost of fund.
 // Show a big blocking popup with an X in the top-right corner; nothing proceeds until the user
 // closes it. Returns true when COF covers from disbursement, false (and shows the popup) otherwise.
+const COF_GAP_MSG = 'Please insert Cost of Fund data covering the period starting from the date of disbursement.';
+function cofCoversDisbursement(cofData, disbursementISO) {
+  return !!(cofData && cofData.length && disbursementISO && cofData[0].date <= disbursementISO);
+}
 function ensureCofCoversDisbursement(cofData, disbursementISO) {
-  if (cofData && cofData.length && disbursementISO && cofData[0].date <= disbursementISO) return true;
+  if (cofCoversDisbursement(cofData, disbursementISO)) return true;
   const x = el('button', { class: 'cof-block-x', type: 'button', title: 'Close', 'aria-label': 'Close' }, '×');
   const card = el('div', { class: 'cof-block-card' },
     x,
     el('div', { class: 'cof-block-icon' }, '⚠'),
     el('p', { class: 'cof-block-msg' },
-      'Please insert Cost of Fund data covering the period starting from the date of disbursement.'),
+      COF_GAP_MSG),
   );
   openModal(card);
   const mc = document.getElementById('modal-card');
@@ -331,17 +335,15 @@ export function renderRegularLoan(root, pre = null) {
   }
   refresh();
 
-  const calcBtn = el('button', { class: 'primary-btn', type: 'button' }, 'Calculate ERR');
   section.appendChild(el('div', { class: 'action-bar' },
     resetButton('regular', () => renderRegularLoan(root), () => collectRegularInputs({
       loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
       loanTenor, paymentMode, totalCof, fundedSecurityType, csAmount, csRate, numInst,
       intFreq, prinFreq, prinStart, prinBasis, splitGrid,
       getCustom: () => customBoxes.map(b => b.getValue() || 0),
-    })), calcBtn));
-  root.appendChild(section);
-  const resultsPanel = el('div');
-  root.appendChild(resultsPanel);
+    }))));
+  const { left, right: resultsPanel } = workbench(root);
+  left.appendChild(section);
 
   // Restore draft
   restoreDraft('regular', {
@@ -364,14 +366,15 @@ export function renderRegularLoan(root, pre = null) {
     getCustom: () => customBoxes.map(b => b.getValue() || 0),
   }));
 
-  calcBtn.addEventListener('click', () => {
+  function compute() {
     const inputs = collectRegularInputs({
       loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
       loanTenor, paymentMode, totalCof, fundedSecurityType, csAmount, csRate, numInst,
       intFreq, prinFreq, prinStart, prinBasis, splitGrid,
       getCustom: () => customBoxes.map(b => b.getValue() || 0),
     });
-    if (!validateRegular(inputs)) return;
+    const msg = validateRegular(inputs);
+    if (msg) return { msg };
     const split = inputs.paymentMode === SPLIT_MODE;
     const moraMonths = (!split && inputs.moratoriumAvail === 'Yes') ? inputs.moratoriumPeriod : 0;
     const isCs = inputs.fundedSecurityType === 'FDR' || inputs.fundedSecurityType === 'Cash Security';
@@ -403,10 +406,9 @@ export function renderRegularLoan(root, pre = null) {
     const schedule = split ? buildSplitSchedule(params) : buildStructuredSchedule(params);
     const metrics = computeMetrics(schedule, params);
     const ctx = { pageType: 'regular', pageTitle: 'Loan Facilities — Structured', inputs, params, schedule, metrics };
-    autoSaveSummary(ctx);
-    renderResults(resultsPanel, ctx);
-    resultsPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  });
+    return { ctx };
+  }
+  attachLiveRecalc(section, resultsPanel, compute);
 }
 
 function collectRegularInputs(f) {
@@ -461,7 +463,7 @@ function validateRegular(i) {
     if ((i.fundedSecurityType === 'FDR' || i.fundedSecurityType === 'Cash Security')
         && (i.csRate === null || i.csAmount === null))
       return fail('Enter Cash Security / FDR Amount and Rate.');
-    return true;
+    return null;
   }
   if (!i.moratoriumAvail) return fail('Select whether a moratorium is available.');
   if (i.moratoriumAvail === 'Yes' && !i.moratoriumPeriod) return fail('Enter Moratorium Period.');
@@ -474,9 +476,11 @@ function validateRegular(i) {
   }
   if (['EMI after Moratorium', 'EQI after Moratorium', 'Installment'].includes(i.fundedSecurityType) && !i.numInst)
     return fail('Enter Number of Installments.');
-  return true;
+  return null;
 }
-function fail(msg) { toast(msg, 'error'); return false; }
+// Returns the reason as a string; live recalc shows it in the results pane rather than
+// firing a toast on every keystroke.
+function fail(msg) { return msg; }
 
 // ============================================================
 // CUSTOMIZED LOAN FACILITY
@@ -694,16 +698,14 @@ export function renderCustomizedLoan(root, pre = null) {
   }
   refresh();
 
-  const calcBtn = el('button', { class: 'primary-btn', type: 'button' }, 'Calculate ERR');
   section.appendChild(el('div', { class: 'action-bar' },
     resetButton('customized', () => renderCustomizedLoan(root), () => collectCustomizedInputs({
       loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
       loanTenor, paymentLayers, totalCof, fundedSecurityType, csAmount, csRate, numInst,
       custSplitGrid,
-    })), calcBtn));
-  root.appendChild(section);
-  const resultsPanel = el('div');
-  root.appendChild(resultsPanel);
+    }))));
+  const { left, right: resultsPanel } = workbench(root);
+  left.appendChild(section);
 
   restoreDraft('customized', {
     loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
@@ -722,14 +724,14 @@ export function renderCustomizedLoan(root, pre = null) {
     custSplitGrid,
   }));
 
-  calcBtn.addEventListener('click', () => {
+  function compute() {
     const inputs = collectCustomizedInputs({
       loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
       loanTenor, paymentLayers, totalCof, fundedSecurityType, csAmount, csRate, numInst,
       custSplitGrid,
     });
     const err = validateCustomized(inputs);
-    if (err) return toast(err, 'error');
+    if (err) return { msg: err };
 
     const mora = inputs.moratoriumAvail === 'Yes' ? inputs.moratoriumPeriod : 0;
     const isCs = inputs.fundedSecurityType === 'FDR' || inputs.fundedSecurityType === 'Cash Security';
@@ -754,10 +756,9 @@ export function renderCustomizedLoan(root, pre = null) {
       numInst: inputs.numInst,
     });
     const ctx = { pageType: 'customized', pageTitle: 'Loan Facilities — Customized', inputs, params, schedule, metrics };
-    autoSaveSummary(ctx);
-    renderResults(resultsPanel, ctx);
-    resultsPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  });
+    return { ctx };
+  }
+  attachLiveRecalc(section, resultsPanel, compute);
 }
 
 function collectCustomizedInputs(f) {
@@ -1040,7 +1041,6 @@ export function renderRateRevisionStructured(root, pre = null) {
   }
   refresh();
 
-  const calcBtn = el('button', { class: 'primary-btn', type: 'button' }, 'Calculate ERR');
   section.appendChild(el('div', { class: 'action-bar' },
     resetButton('revisionStructured', () => renderRateRevisionStructured(root), () => ({
       ...collectRevisionStructuredInputs({
@@ -1050,10 +1050,9 @@ export function renderRateRevisionStructured(root, pre = null) {
         getRrCustom: () => rrCustomBoxes.map(b => b.getValue() || 0),
       }),
       cofRows: (cofUpload.getRows() || []).length,
-    })), calcBtn));
-  root.appendChild(section);
-  const resultsPanel = el('div');
-  root.appendChild(resultsPanel);
+    }))));
+  const { left, right: resultsPanel } = workbench(root);
+  left.appendChild(section);
 
   restoreDraft('revisionStructured', {
     initialAmount, disbursementDate, moratoriumAvail, moratoriumPeriod, idpField,
@@ -1076,49 +1075,52 @@ export function renderRateRevisionStructured(root, pre = null) {
     getRrCustom: () => rrCustomBoxes.map(b => b.getValue() || 0),
   }));
 
-  calcBtn.addEventListener('click', () => {
+  function compute() {
+    // Every guard below used to be a toast fired by the Calculate button. Live, they become
+    // the line shown in the results pane instead.
+    const stop = (msg) => ({ msg });
     const inputs = collectRevisionStructuredInputs({
       initialAmount, disbursementDate, moratoriumAvail, moratoriumPeriod, idpField,
       paymentModality, tenorMonths, rateLayers, securityLayers, referenceField,
       rrIntFreq, rrPrinFreq, rrPrinStart, rrPrinBasis, rrSplitGrid,
       getRrCustom: () => rrCustomBoxes.map(b => b.getValue() || 0),
     });
-    if (!inputs.initialAmount) return toast('Enter Initial Loan Amount.', 'error');
-    if (!inputs.disbursementDate) return toast('Enter Disbursement Date.', 'error');
+    if (!inputs.initialAmount) return stop('Enter Initial Loan Amount.');
+    if (!inputs.disbursementDate) return stop('Enter Disbursement Date.');
     const dow = new Date(inputs.disbursementDate).getDay();
-    if (dow === 5 || dow === 6) return toast('Disbursement Date cannot be Friday or Saturday.', 'error');
-    if (!inputs.tenorMonths) return toast('Enter Loan Tenor.', 'error');
-    if (!inputs.paymentModality) return toast('Select a Payment Modality.', 'error');
+    if (dow === 5 || dow === 6) return stop('Disbursement Date cannot be Friday or Saturday.');
+    if (!inputs.tenorMonths) return stop('Enter Loan Tenor.');
+    if (!inputs.paymentModality) return stop('Select a Payment Modality.');
     const rrSplit = inputs.paymentModality === SPLIT_MODE;
-    if (!rrSplit && !inputs.moratoriumAvail) return toast('Select whether a moratorium is given at disbursement.', 'error');
+    if (!rrSplit && !inputs.moratoriumAvail) return stop('Select whether a moratorium is given at disbursement.');
     if (rrSplit) {
       if (FREQ[inputs.rrIntFreq] > FREQ[inputs.rrPrinFreq])
-        return toast(`Interest cannot be paid less often than principal — ${inputs.rrIntFreq} interest with ${inputs.rrPrinFreq} principal leaves a principal month with no interest settlement.`, 'error');
+        return stop(`Interest cannot be paid less often than principal — ${inputs.rrIntFreq} interest with ${inputs.rrPrinFreq} principal leaves a principal month with no interest settlement.`);
       if (inputs.rrPrinStart < 1 || inputs.rrPrinStart > inputs.tenorMonths)
-        return toast(`Principal Payments Start From Month must be between 1 and ${inputs.tenorMonths}.`, 'error');
+        return stop(`Principal Payments Start From Month must be between 1 and ${inputs.tenorMonths}.`);
       if (inputs.rrPrinBasis === 'Different per Date') {
         const dts = principalPaymentMonths(inputs.rrPrinStart, inputs.tenorMonths, FREQ[inputs.rrPrinFreq]);
         const earlier = inputs.rrCustomPrincipals.slice(0, Math.max(0, dts.length - 1));
         if (earlier.reduce((a, v) => a + (v || 0), 0) > inputs.initialAmount)
-          return toast('The principal amounts entered exceed the Initial Loan Amount.', 'error');
+          return stop('The principal amounts entered exceed the Initial Loan Amount.');
         if (dts.length > 1 && !earlier.some(v => v))
-          return toast('Enter the principal amount for at least one payment date, or switch Principal Amount to "Fixed (Equal)".', 'error');
+          return stop('Enter the principal amount for at least one payment date, or switch Principal Amount to "Fixed (Equal)".');
       }
     }
-    if (!inputs.rateLayers.length) return toast('Add at least one Lending Rate Layer.', 'error');
+    if (!inputs.rateLayers.length) return stop('Add at least one Lending Rate Layer.');
 
     const mat = maturityISO();
     const lastRateFrom = inputs.rateLayers[inputs.rateLayers.length - 1].fromDate;
-    if (lastRateFrom && mat && lastRateFrom >= mat) return toast(`The last Lending Rate Layer's From Date (${lastRateFrom}) must be earlier than loan maturity (${mat}).`, 'error');
+    if (lastRateFrom && mat && lastRateFrom >= mat) return stop(`The last Lending Rate Layer's From Date (${lastRateFrom}) must be earlier than loan maturity (${mat}).`);
     if (inputs.securityLayers.length) {
       const lastSecFrom = inputs.securityLayers[inputs.securityLayers.length - 1].fromDate;
-      if (lastSecFrom && mat && lastSecFrom >= mat) return toast(`The last Loan Security Layer's From Date (${lastSecFrom}) must be earlier than loan maturity (${mat}).`, 'error');
+      if (lastSecFrom && mat && lastSecFrom >= mat) return stop(`The last Loan Security Layer's From Date (${lastSecFrom}) must be earlier than loan maturity (${mat}).`);
     }
 
     // Build COF effective-date data from the uploaded file (cut at maturity). COF must cover from
     // the disbursement date — otherwise ERR is not calculated and a blocking popup is shown.
     const { cofData } = buildCofData(cofUpload.getRows(), inputs.disbursementDate, mat);
-    if (!ensureCofCoversDisbursement(cofData, inputs.disbursementDate)) return;
+    if (!cofCoversDisbursement(cofData, inputs.disbursementDate)) return stop(COF_GAP_MSG);
 
     const mora = (!rrSplit && inputs.moratoriumAvail === 'Yes') ? inputs.moratoriumPeriod : 0;
     const params = {
@@ -1148,10 +1150,9 @@ export function renderRateRevisionStructured(root, pre = null) {
     const metrics = computeRevisionMetrics(schedule);
     const ctx = { pageType: 'revisionStructured', pageTitle: 'Rate Revision — Structured',
       inputs: { ...inputs, cofRecordCount: cofData.length }, params, schedule, metrics };
-    autoSaveSummary(ctx);
-    renderResults(resultsPanel, ctx);
-    resultsPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  });
+    return { ctx };
+  }
+  attachLiveRecalc(section, resultsPanel, compute);
 }
 
 function collectRevisionStructuredInputs(f) {
@@ -1234,25 +1235,23 @@ export function renderRateRevisionCustomized(root) {
   });
   section.appendChild(el('div', { class: 'form-row' }, referenceField));
 
-  const calcBtn = el('button', { class: 'primary-btn', type: 'button' }, 'Calculate ERR');
   section.appendChild(el('div', { class: 'action-bar' },
     resetButton('revisionCustomized', () => renderRateRevisionCustomized(root), () => ({
       uploadedRows: uploadedRows ? uploadedRows.length : 0,
       uploadedCof: uploadedCof ? uploadedCof.length : 0,
       securityLayers: securityLayers.getValue(),
-    })), calcBtn));
-  root.appendChild(section);
-  const resultsPanel = el('div');
-  root.appendChild(resultsPanel);
+    }))));
+  const { left, right: resultsPanel } = workbench(root);
+  left.appendChild(section);
 
-  calcBtn.addEventListener('click', () => {
-    if (!uploadedRows) return toast('Upload the amortization schedule + COF layers file first.', 'error');
+  function compute() {
+    if (!uploadedRows) return { msg: 'Upload the amortization schedule + COF layers file to see the results.' };
     // COF effective-date list from the uploaded file's COF Layers sheet, clipped to the schedule's
     // span (first row = disbursement, last row = maturity), mirroring Rate Revision — Structured.
     const firstDate = uploadedRows[0] && uploadedRows[0].date;
     const lastDate = uploadedRows[uploadedRows.length - 1] && uploadedRows[uploadedRows.length - 1].date;
     const { cofData } = buildCofData(uploadedCof, firstDate, lastDate);
-    if (!ensureCofCoversDisbursement(cofData, firstDate)) return;
+    if (!cofCoversDisbursement(cofData, firstDate)) return { msg: COF_GAP_MSG };
     const inputs = {
       securityLayers: securityLayers.getValue().filter(r => r.fromDate),
       cofRecords: (cofData || []).length,
@@ -1279,10 +1278,9 @@ export function renderRateRevisionCustomized(root) {
       // per-row NIM/ERR (yield to maturity) columns with the same day-count method.
       params: { cofData, securityLayers: inputs.securityLayers }, schedule, metrics,
     };
-    autoSaveSummary(ctx);
-    renderResults(resultsPanel, ctx);
-    resultsPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  });
+    return { ctx };
+  }
+  attachLiveRecalc(section, resultsPanel, compute);
 }
 
 // ============================================================
@@ -1305,6 +1303,43 @@ export function applyEntryAnswers(pairs) {
     const live = [...row.querySelectorAll('.field')].some(f => f.style.display !== 'none');
     if (!live) row.style.display = 'none';
   });
+}
+
+// Inputs left, results right on a wide screen; stacked on a narrow one. The results pane
+// is never empty-and-silent: until the inputs are usable it says what is still needed.
+function workbench(root) {
+  const left = el('div', { class: 'wb-input' });
+  const right = el('div', { class: 'wb-output' });
+  root.appendChild(el('div', { class: 'workbench' }, left, right));
+  return { left, right };
+}
+
+function renderPending(panel, msg) {
+  panel.innerHTML = '';
+  panel.appendChild(el('div', { class: 'section-card pending-card' },
+    el('div', { class: 'pending-title' }, 'Results'),
+    el('p', { class: 'pending-msg' },
+      msg || 'Fill in the details and the schedule will build itself here.')));
+}
+
+// Recalculation runs on every edit, so it must be cheap to call and must never interrupt
+// with a toast or a modal — `compute` returns a ctx, or null having recorded why not.
+function attachLiveRecalc(sectionEl, panel, compute) {
+  let timer = null;
+  const run = () => {
+    if (!document.body.contains(sectionEl)) return;
+    let ctx = null, msg = null;
+    try { const r = compute(); ctx = r && r.ctx; msg = r && r.msg; }
+    catch (e) { msg = 'Could not calculate with these inputs yet.'; }
+    if (!ctx) return renderPending(panel, msg);
+    autoSaveSummary(ctx);
+    renderResults(panel, ctx);
+  };
+  const schedule = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => { timer = null; run(); }, 140); };
+  sectionEl.addEventListener('input', schedule);
+  sectionEl.addEventListener('change', schedule);
+  run();
+  return run;
 }
 
 function pageTitle(text) {

@@ -1,13 +1,13 @@
 // App controller: screen routing, theme, compare view
-import { el, openModal, closeModal, toast, optionField } from './components.js?v=20260916j';
+import { el, openModal, closeModal, toast, optionField } from './components.js?v=20260916k';
 import {
   renderRegularLoan, renderCustomizedLoan,
   renderRateRevisionStructured, renderRateRevisionCustomized,
-} from './pages.js?v=20260916j';
-import { renderLanding, renderRevisionChoice, renderQuestions, answerSummary } from './screens.js?v=20260916j';
-import { listSummaries, deleteSummary } from './storage.js?v=20260916j';
-import { formatPercent, formatMoney, formatNumber } from './formatting.js?v=20260916j';
-import { openManual } from './manual.js?v=20260916j';
+} from './pages.js?v=20260916k';
+import { renderLanding, renderRevisionChoice, renderQuestions, answerSummary } from './screens.js?v=20260916k';
+import { listSummaries, deleteSummary } from './storage.js?v=20260916k';
+import { formatPercent, formatMoney, formatNumber } from './formatting.js?v=20260916k';
+import { openManual } from './manual.js?v=20260916k';
 
 const root = document.getElementById('app-root');
 const compareBtn = document.getElementById('compare-btn');
