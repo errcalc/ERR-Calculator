@@ -113,7 +113,7 @@ function ensureCofCoversDisbursement(cofData, disbursementISO) {
 // ============================================================
 // REGULAR (STRUCTURED) LOAN FACILITY
 // ============================================================
-export function renderRegularLoan(root) {
+export function renderRegularLoan(root, pre = null) {
   root.innerHTML = '';
   const section = el('div', { class: 'section-card' });
 
@@ -350,6 +350,12 @@ export function renderRegularLoan(root) {
     intFreq, prinFreq, prinStart, prinBasis, splitGrid,
     getCustom: () => customBoxes.map(b => b.getValue() || 0),
   });
+  // After the draft, never before: the entry answers are the fresher truth.
+  applyEntryAnswers([
+    [moratoriumAvail, pre && pre.moratorium],
+    [moratoriumPeriod, pre && pre.moratoriumMonths],
+    [paymentMode, pre && pre.modality],
+  ]);
   refresh();
   attachDraftAutosave('regular', section, () => collectRegularInputs({
     loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
@@ -475,7 +481,7 @@ function fail(msg) { toast(msg, 'error'); return false; }
 // ============================================================
 // CUSTOMIZED LOAN FACILITY
 // ============================================================
-export function renderCustomizedLoan(root) {
+export function renderCustomizedLoan(root, pre = null) {
   root.innerHTML = '';
   const section = el('div', { class: 'section-card' });
 
@@ -704,6 +710,11 @@ export function renderCustomizedLoan(root) {
     loanTenor, paymentLayers, totalCof, fundedSecurityType, csAmount, csRate, numInst,
     custSplitGrid,
   });
+  // After the draft, never before: the entry answers are the fresher truth.
+  applyEntryAnswers([
+    [moratoriumAvail, pre && pre.moratorium],
+    [moratoriumPeriod, pre && pre.moratoriumMonths],
+  ]);
   refresh(); refreshLayerOpts();
   attachDraftAutosave('customized', section, () => collectCustomizedInputs({
     loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
@@ -838,7 +849,7 @@ function validateCustomized(i) {
 // ============================================================
 // RATE REVISION — STRUCTURED
 // ============================================================
-export function renderRateRevisionStructured(root) {
+export function renderRateRevisionStructured(root, pre = null) {
   root.innerHTML = '';
   const section = el('div', { class: 'section-card' });
 
@@ -1050,6 +1061,12 @@ export function renderRateRevisionStructured(root) {
     rrIntFreq, rrPrinFreq, rrPrinStart, rrPrinBasis, rrSplitGrid,
     getRrCustom: () => rrCustomBoxes.map(b => b.getValue() || 0),
   });
+  // After the draft, never before: the entry answers are the fresher truth.
+  applyEntryAnswers([
+    [moratoriumAvail, pre && pre.moratorium],
+    [moratoriumPeriod, pre && pre.moratoriumMonths],
+    [paymentModality, pre && pre.modality],
+  ]);
   refresh();
   setTimeout(() => { rateLayers.applyLayerRules(); securityLayers.applyLayerRules(); }, 150);
   attachDraftAutosave('revisionStructured', section, () => collectRevisionStructuredInputs({
@@ -1271,6 +1288,25 @@ export function renderRateRevisionCustomized(root) {
 // ============================================================
 // Shared helpers
 // ============================================================
+// Answers already given on the entry screen: fill the field, then drop it out of the form.
+// An inline display:none survives refresh()'s .hidden toggling, so each form's own
+// conditional logic keeps running untouched underneath.
+export function applyEntryAnswers(pairs) {
+  const rows = new Set();
+  pairs.forEach(([field, value]) => {
+    if (!field || value === undefined || value === null || value === '') return;
+    field.setValue(value);
+    field.style.display = 'none';
+    const row = field.closest('.form-row');
+    if (row) rows.add(row);
+  });
+  // A row whose every field has gone would otherwise leave a gap behind.
+  rows.forEach((row) => {
+    const live = [...row.querySelectorAll('.field')].some(f => f.style.display !== 'none');
+    if (!live) row.style.display = 'none';
+  });
+}
+
 function pageTitle(text) {
   return el('div', { class: 'page-title' }, el('h1', {}, text));
 }
