@@ -773,7 +773,7 @@ select option { color: var(--text); background: var(--bg-elev); }
 .add-layer {
   align-self: flex-start;
   background: var(--bg);
-  border: 1px dashed var(--border-strong);
+  border: 1px solid var(--border-strong);
   color: var(--text-soft);
   padding: 8px 14px;
   border-radius: var(--radius-sm);
@@ -927,7 +927,7 @@ tr.totals-row td {
   margin-top: 12px;
 }
 .totals-card {
-  background: var(--bg-soft);
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 10px 12px;
@@ -1171,10 +1171,9 @@ table.schedule th {
 
 /* ===== Loan Security layers — read-only table + editor popup ===== */
 /* Outlined panel for the layer sections (matches the COF upload box). */
-.layer-panel {
-  border: 1.5px dashed var(--border); border-radius: var(--radius-sm);
-  background: var(--bg); padding: 16px 18px; margin-bottom: 12px;
-}
+/* A group of layers is a heading plus its table — no box. Dashed borders are reserved
+   for genuine file-drop zones (.upload-zone), where the convention actually means something. */
+.layer-panel { border: none; background: none; padding: 0; margin-bottom: 22px; }
 
 .sec-table { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
 .sec-empty { padding: 10px 2px; }
@@ -1198,7 +1197,7 @@ table.schedule th {
 .sec-btn.sec-del:hover { border-color: var(--danger); color: var(--danger); }
 .sec-add-btn {
   margin-top: 8px; padding: 7px 14px; border-radius: var(--radius-sm);
-  border: 1px dashed var(--border-strong); background: var(--bg-soft); color: var(--text-soft);
+  border: 1px solid var(--border-strong); background: var(--bg-soft); color: var(--text-soft);
   font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
 }
 .sec-add-btn:hover { border-color: var(--primary); color: var(--primary); }
@@ -1309,33 +1308,6 @@ table.schedule th {
   .layer-row .row-del { font-size: 15px; }
   .add-layer { font-size: 12px; padding: 7px 10px; }
 
-  /* Payment Layers (Loan Facilities — Customized): 4 equal boxes spanning the FULL
-     width. The delete (×) is lifted out of the grid and overlaid at the row's top-right
-     corner so it claims no column. No dropdown arrow; smaller font for this table only. */
-  .layers[data-name="paymentLayers"] .layer-header,
-  .layers[data-name="paymentLayers"] .layer-row {
-    gap: 4px;
-  }
-  .layers[data-name="paymentLayers"] .layer-row { position: relative; }
-  .layers[data-name="paymentLayers"] .layer-row .row-del {
-    position: absolute;
-    top: 0;
-    right: 2px;
-    font-size: 13px;
-    line-height: 1;
-    padding: 0 2px;
-  }
-  .layers[data-name="paymentLayers"] .layer-row select {
-    font-size: 10.5px;
-    padding: 5px 3px;
-  }
-  /* The Custom Principal text input stays 16px so iOS/WebKit doesn't zoom on focus */
-  .layers[data-name="paymentLayers"] .layer-row input {
-    font-size: 16px;
-    padding: 5px 3px;
-  }
-  .layers[data-name="paymentLayers"] .layer-header { font-size: 8.5px; letter-spacing: 0; }
-
   .results-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .metric-card { padding: 12px; }
   .metric-card .value { font-size: 18px; }
@@ -1366,6 +1338,61 @@ table.schedule th {
 .pending-card { color: var(--text-soft); }
 .pending-title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
 .pending-msg { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text-mute); }
+
+/* The input pane is a query container so the layer tables can respond to the space they
+   actually have rather than to the size of the window. */
+.wb-input { container-type: inline-size; }
+
+@container (max-width: 700px) {
+/* Layers stop being a table whenever their PANE is narrow — not just on a phone.
+   Each layer becomes a card of label/value rows, using the data-label the cell already
+   carries. Column headers are redundant once every value is labelled in place. */
+.layers .layer-header { display: none; }
+.layers .layer-row {
+  display: block;
+  position: relative;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+/* Label above the control, exactly like every other .field in the app — and the only
+   layout that gives "Interest & Principal (Separate Frequency)" the width it needs. */
+.layers .layer-cell {
+  display: block;
+  padding: 6px 0;
+}
+.layers .layer-cell::before {
+  content: attr(data-label);
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-soft);
+  margin-bottom: 5px;
+}
+/* Stacked, there is no grid track to hold open, so an unusable cell can go entirely. */
+.layers .layer-cell.cell-na { display: none; }
+.layers .layer-row input {
+  font-size: 16px;   /* 16px stops iOS/WebKit zooming the page on focus */
+  padding: 7px 10px;
+  text-align: left;
+}
+/* A <select> never triggers that zoom, so it can stay smaller — which is what lets the
+   longest option ("Interest & Principal (Separate Frequency)") fit at 375px. */
+.layers .layer-row select {
+  font-size: 14px;
+  padding: 7px 10px;
+  text-align: left;
+  text-align-last: left;
+}
+.layers .layer-row .row-del {
+  position: absolute;
+  top: -9px;
+  right: -9px;
+}
+
+}
 
 /* ============ Entry screens ============
    Module picker, the Rate Revision fork, and the question card. One card treatment only —
