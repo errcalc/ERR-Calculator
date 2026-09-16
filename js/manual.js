@@ -1,8 +1,30 @@
 // Per-module user guide — opened from the info button in the header. Plain, simple language
 // (explained as if to a 10-year-old). Sections are collapsed by default; click to expand.
-import { el, openModal, closeModal } from './components.js?v=20260917h';
+import { el, openModal, closeModal } from './components.js?v=20260917k';
 
 // ---- Shared sections reused across modules ----
+const MODALITY_BULLETS = [
+  'EMI — the same total amount every month.',
+  'EQI — the same total amount every 3 months.',
+  'Equal Principal + Interest (Monthly or Quarterly) — pays the same chunk of the original loan each time, plus interest on what is left.',
+  'Interest & Principal (Separate Frequency) — interest and principal are paid on DIFFERENT months. For example, interest every month but principal only at the end of each quarter.',
+];
+const MORATORIUM_Q = {
+  h: 'Does the loan have a moratorium period?',
+  p: 'A moratorium is a “rest period” at the very start, when the borrower does not repay yet. Answer Yes or No.',
+  bullets: [
+    'How many months it lasts is asked on the next screen, with the rest of the numbers.',
+    'Saying Yes also changes the wording of the questions that follow, so they talk about what happens AFTER the rest period.',
+  ],
+};
+const NEXT_STEP_Q = {
+  h: 'What happens after this',
+  p: 'Answer everything and “Continue” takes you to the form, which only shows the boxes your answers made relevant.',
+  bullets: [
+    'Your answers appear as grey pills along the top of the form.',
+    'Click “Change” beside them to come back here and answer differently — what you typed on the form is kept.',
+  ],
+};
 const FLOW_SECTION = {
   h: 'How this page works',
   p: 'Each module has two steps, so you are never shown boxes that have nothing to do with your deal.',
@@ -71,21 +93,61 @@ const MANUALS = {
         ],
       },
       FLOW_SECTION,
+    ],
+  },
+
+  // Step 1 of Loan Facilities: only the questions actually on screen.
+  questionsLoan: {
+    title: 'Loan Facilities — the questions',
+    intro: 'Two or three short questions about the deal. They decide which boxes the next screen shows you, so you are never given fields that have nothing to do with your loan.',
+    sections: [
+      MORATORIUM_Q,
       {
-        h: 'The questions you will be asked',
-        p: 'Two or three short ones, and they decide which form you land on:',
+        h: 'Does the payment have multiple layers?',
+        p: 'This asks whether the borrower pays the same way for the whole loan, or differently at different points in its life.',
         bullets: [
-          'Does the loan have a moratorium period? A moratorium is a “rest period” at the start when the borrower does not repay yet.',
-          'Does the payment have multiple layers? Say Yes if the borrower pays one way for part of the loan and a different way later on — for example EMI for the first year, then something else.',
-          'Payment Modality — only asked when there is just ONE style for the whole loan, because a layered loan carries a style per layer instead.',
+          'No — one style from start to finish. You will be asked which one next.',
+          'Yes — for example EMI for the first year and something else afterwards. You get a Payment Layers table on the form, one row per stretch of the loan, each with its own style. There is no single modality question, because each layer carries its own.',
         ],
       },
       {
-        h: 'Rate Revision asks one thing first',
-        p: 'Before the questions, Rate Revision asks how you want to give it the loan:',
+        h: 'Payment Modality',
+        p: 'Only appears when you answered No above — a layered loan sets its style per layer instead. The choices are:',
+        bullets: MODALITY_BULLETS,
+      },
+      NEXT_STEP_Q,
+    ],
+  },
+
+  // Step 1 of Rate Revision: no layers question here.
+  questionsRevision: {
+    title: 'Rate Revision — the questions',
+    intro: 'Two short questions about the facility as it was originally given out. The rate changes themselves are listed on the next screen.',
+    sections: [
+      MORATORIUM_Q,
+      {
+        h: 'Payment Modality',
+        p: 'How the borrower repays. Unlike Loan Facilities there is no layers question here, so this is always asked. The choices are:',
+        bullets: MODALITY_BULLETS,
+      },
+      NEXT_STEP_Q,
+    ],
+  },
+
+  // The fork shown before Rate Revision's questions.
+  revisionChoice: {
+    title: 'Rate Revision',
+    intro: 'First, how do you want to give the system the loan? Pick whichever matches what you already have to hand.',
+    sections: [
+      {
+        h: 'Enter the loan details',
+        p: 'Choose this when you have the original terms — amount, disbursement date, tenor — and the list of rates with the dates they changed. The system rebuilds the whole payment schedule from them.',
+      },
+      {
+        h: 'Upload an existing schedule',
+        p: 'Choose this when the finished payment schedule already exists in a file, with the rate changes worked into it. You upload that file instead of answering anything.',
         bullets: [
-          'Enter the loan details — you have the original terms and the rate changes, and the system rebuilds the schedule for you.',
-          'Upload an existing schedule — you already have the finished payment schedule in a file, so none of the questions apply.',
+          'The moratorium and modality questions are skipped, because a finished schedule already has them baked in.',
         ],
       },
     ],

@@ -1,13 +1,13 @@
 // App controller: screen routing, theme, compare view
-import { el, openModal, closeModal, toast, optionField } from './components.js?v=20260917j';
+import { el, openModal, closeModal, toast, optionField } from './components.js?v=20260917k';
 import {
   renderRegularLoan, renderCustomizedLoan,
   renderRateRevisionStructured, renderRateRevisionCustomized,
-} from './pages.js?v=20260917j';
-import { renderLanding, renderRevisionChoice, renderQuestions, answerSummary } from './screens.js?v=20260917j';
-import { listSummaries, deleteSummary } from './storage.js?v=20260917j';
-import { formatPercent, formatMoney, formatNumber } from './formatting.js?v=20260917j';
-import { openManual } from './manual.js?v=20260917j';
+} from './pages.js?v=20260917k';
+import { renderLanding, renderRevisionChoice, renderQuestions, answerSummary } from './screens.js?v=20260917k';
+import { listSummaries, deleteSummary } from './storage.js?v=20260917k';
+import { formatPercent, formatMoney, formatNumber } from './formatting.js?v=20260917k';
+import { openManual } from './manual.js?v=20260917k';
 
 const root = document.getElementById('app-root');
 const compareBtn = document.getElementById('compare-btn');
@@ -50,10 +50,15 @@ document.getElementById('theme-toggle').addEventListener('click', () => {
 document.getElementById('brand-home').addEventListener('click', () => go({ screen: 'landing' }));
 
 // ---------------- Info button → per-module user guide ----------------
-// On the landing and question screens there is no form yet, so the guide explains the two
-// modules and the questions instead of a form the user has not reached.
-document.getElementById('info-btn').addEventListener('click',
-  () => openManual(view.screen === 'form' ? formKey() : 'home'));
+// Each screen gets its own guide. Lumping the landing and the questions together meant a
+// user who had already picked a module was still being asked "which module do I want?".
+function manualKey() {
+  if (view.screen === 'form') return formKey();
+  if (view.screen === 'questions') return view.module === 'loan' ? 'questionsLoan' : 'questionsRevision';
+  if (view.screen === 'revisionChoice') return 'revisionChoice';
+  return 'home';
+}
+document.getElementById('info-btn').addEventListener('click', () => openManual(manualKey()));
 
 // ---------------- Compare button visibility ----------------
 function refreshCompareVisibility() {
