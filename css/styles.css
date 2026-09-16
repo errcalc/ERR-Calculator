@@ -44,6 +44,10 @@
   --focus: 0 0 0 3px rgba(111, 136, 255, 0.35);
 }
 
+/* Height of the sticky app bar. The schedule's sticky column headers park just below it. */
+:root { --app-header-h: 66px; }
+@media (max-width: 600px) { :root { --app-header-h: 62px; } }
+
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 html { font-size: 11.5px; } /* shrink whole UI to ~70% (16 -> 11.5) */
@@ -1058,15 +1062,20 @@ table.schedule th {
   font-weight: 600;
   font-size: 12px;
   letter-spacing: 0.3px;
-  position: sticky;
-  top: 0;
+  /* Not sticky: .table-wrap must keep overflow-x for narrow panes, and an overflow
+     container captures sticky positioning in BOTH axes — so a sticky header here would
+     silently scroll away with the page rather than hold. */
 }
+/* The schedule used to scroll inside its own 420px box — a scrollbar inside a scrollbar.
+   It now flows at full height and the page scrolls, which also lets the sticky column
+   headers work against the page. */
 .table-wrap {
-  max-height: 420px;
-  overflow: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
+/* A 7-column schedule (with Date and Accrued Interest) needs ~700px and the pane never
+   exceeds 596px, so sideways scrolling has to stay available at every width. */
+.table-wrap { overflow-x: auto; }
 
 /* Compare view */
 .compare-grid-wrap { margin-top: 12px; }
@@ -1341,9 +1350,10 @@ table.schedule th {
 
 /* The input pane is a query container so the layer tables can respond to the space they
    actually have rather than to the size of the window. */
-.wb-input { container-type: inline-size; }
+.wb-input { container-type: inline-size; container-name: inputpane; }
+.wb-output { container-type: inline-size; container-name: outputpane; }
 
-@container (max-width: 700px) {
+@container inputpane (max-width: 700px) {
 /* Layers stop being a table whenever their PANE is narrow — not just on a phone.
    Each layer becomes a card of label/value rows, using the data-label the cell already
    carries. Column headers are redundant once every value is labelled in place. */

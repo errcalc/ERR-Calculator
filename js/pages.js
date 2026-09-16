@@ -355,7 +355,6 @@ export function renderRegularLoan(root, pre = null) {
   // After the draft, never before: the entry answers are the fresher truth.
   applyEntryAnswers([
     [moratoriumAvail, pre && pre.moratorium],
-    [moratoriumPeriod, pre && pre.moratoriumMonths],
     [paymentMode, pre && pre.modality],
   ]);
   refresh();
@@ -715,7 +714,6 @@ export function renderCustomizedLoan(root, pre = null) {
   // After the draft, never before: the entry answers are the fresher truth.
   applyEntryAnswers([
     [moratoriumAvail, pre && pre.moratorium],
-    [moratoriumPeriod, pre && pre.moratoriumMonths],
   ]);
   refresh(); refreshLayerOpts();
   attachDraftAutosave('customized', section, () => collectCustomizedInputs({
@@ -1063,7 +1061,6 @@ export function renderRateRevisionStructured(root, pre = null) {
   // After the draft, never before: the entry answers are the fresher truth.
   applyEntryAnswers([
     [moratoriumAvail, pre && pre.moratorium],
-    [moratoriumPeriod, pre && pre.moratoriumMonths],
     [paymentModality, pre && pre.modality],
   ]);
   refresh();

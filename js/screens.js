@@ -6,7 +6,7 @@
 // that with two modules and a handful of questions the RM can actually answer; the answers
 // decide which form they land on, and are carried into it so nothing is asked twice.
 // ============================================================
-import { el, optionField, numberField } from './components.js?v=20260917c';
+import { el, optionField } from './components.js?v=20260917g';
 
 export const MODALITIES = [
   'EMI', 'EQI',
@@ -76,11 +76,6 @@ export function renderQuestions(root, ctx, go) {
     options: [{ label: 'select', value: '' }, 'No', 'Yes'], value: a.moratorium || '',
     onChange: () => refresh(),
   });
-  const moraMonths = numberField({
-    label: 'Moratorium Period (Months)', name: 'qMoraMonths', integerOnly: true, min: 1,
-  });
-  if (a.moratoriumMonths) moraMonths.setValue(a.moratoriumMonths);
-  moraMonths.input.addEventListener('input', () => refresh());
 
   const layers = optionField({
     label: 'Does the payment have multiple layers?', name: 'qLayers',
@@ -94,9 +89,9 @@ export function renderQuestions(root, ctx, go) {
     onChange: () => refresh(),
   });
 
-  const moraRow = el('div', { class: 'form-row' }, mora, moraMonths);
-  const layersRow = el('div', { class: 'form-row' }, layers);
-  const modalityRow = el('div', { class: 'form-row' }, modality);
+  const moraRow = el('div', { class: 'form-row one' }, mora);
+  const layersRow = el('div', { class: 'form-row one' }, layers);
+  const modalityRow = el('div', { class: 'form-row one' }, modality);
 
   const contBtn = el('button', { class: 'primary-btn', type: 'button' }, 'Continue');
 
@@ -108,17 +103,14 @@ export function renderQuestions(root, ctx, go) {
     el('h1', { class: 'screen-title' }, isLoan ? 'Loan Facilities' : 'Rate Revision'),
     card));
 
-  const moraAnswered = () => {
-    const v = mora.getValue();
-    if (!v) return false;
-    return v === 'No' || (moraMonths.getValue() || 0) > 0;
-  };
+  // How many months is asked on the form itself; here we only need to know whether there
+  // is a moratorium at all, since that is what the later labels and routing depend on.
+  const moraAnswered = () => !!mora.getValue();
   // Revision has no layers question, so it always needs a modality.
   const needsModality = () => !isLoan || layers.getValue() === 'No';
 
   function refresh() {
     const yes = mora.getValue() === 'Yes';
-    moraMonths.classList.toggle('hidden', !yes);
 
     // Each question appears only once the one before it is settled.
     layersRow.classList.toggle('hidden', !isLoan || !moraAnswered());
@@ -140,7 +132,6 @@ export function renderQuestions(root, ctx, go) {
   contBtn.addEventListener('click', () => {
     const answers = {
       moratorium: mora.getValue(),
-      moratoriumMonths: mora.getValue() === 'Yes' ? (moraMonths.getValue() || 0) : null,
       multiLayers: isLoan ? layers.getValue() : 'No',
       modality: needsModality() ? modality.getValue() : null,
     };
@@ -158,7 +149,7 @@ export function renderQuestions(root, ctx, go) {
 export function answerSummary(ctx, onEdit) {
   const a = ctx.answers || {};
   const bits = [];
-  bits.push(a.moratorium === 'Yes' ? `Moratorium ${a.moratoriumMonths} mo` : 'No moratorium');
+  bits.push(a.moratorium === 'Yes' ? 'Moratorium' : 'No moratorium');
   if (ctx.module === 'loan') bits.push(a.multiLayers === 'Yes' ? 'Multiple payment layers' : 'Single modality');
   if (a.modality) bits.push(a.modality);
 
