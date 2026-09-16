@@ -1,13 +1,13 @@
 // App controller: screen routing, theme, compare view
-import { el, openModal, closeModal, toast, optionField } from './components.js?v=20260917g';
+import { el, openModal, closeModal, toast, optionField } from './components.js?v=20260917h';
 import {
   renderRegularLoan, renderCustomizedLoan,
   renderRateRevisionStructured, renderRateRevisionCustomized,
-} from './pages.js?v=20260917g';
-import { renderLanding, renderRevisionChoice, renderQuestions, answerSummary } from './screens.js?v=20260917g';
-import { listSummaries, deleteSummary } from './storage.js?v=20260917g';
-import { formatPercent, formatMoney, formatNumber } from './formatting.js?v=20260917g';
-import { openManual } from './manual.js?v=20260917g';
+} from './pages.js?v=20260917h';
+import { renderLanding, renderRevisionChoice, renderQuestions, answerSummary } from './screens.js?v=20260917h';
+import { listSummaries, deleteSummary } from './storage.js?v=20260917h';
+import { formatPercent, formatMoney, formatNumber } from './formatting.js?v=20260917h';
+import { openManual } from './manual.js?v=20260917h';
 
 const root = document.getElementById('app-root');
 const compareBtn = document.getElementById('compare-btn');
@@ -50,7 +50,10 @@ document.getElementById('theme-toggle').addEventListener('click', () => {
 document.getElementById('brand-home').addEventListener('click', () => go({ screen: 'landing' }));
 
 // ---------------- Info button → per-module user guide ----------------
-document.getElementById('info-btn').addEventListener('click', () => openManual(TABS[formKey()] ? formKey() : 'regular'));
+// On the landing and question screens there is no form yet, so the guide explains the two
+// modules and the questions instead of a form the user has not reached.
+document.getElementById('info-btn').addEventListener('click',
+  () => openManual(view.screen === 'form' ? formKey() : 'home'));
 
 // ---------------- Compare button visibility ----------------
 function refreshCompareVisibility() {

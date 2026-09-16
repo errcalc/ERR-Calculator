@@ -1,8 +1,28 @@
 // Per-module user guide — opened from the info button in the header. Plain, simple language
 // (explained as if to a 10-year-old). Sections are collapsed by default; click to expand.
-import { el, openModal, closeModal } from './components.js?v=20260916a';
+import { el, openModal, closeModal } from './components.js?v=20260917h';
 
 // ---- Shared sections reused across modules ----
+const FLOW_SECTION = {
+  h: 'How this page works',
+  p: 'Each module has two steps, so you are never shown boxes that have nothing to do with your deal.',
+  bullets: [
+    'Step 1 — a few short questions: is there a moratorium, does the payment style change part-way through the loan, and if it does not, which style is it.',
+    'Step 2 — the form: everything else. Only the boxes your answers made relevant appear.',
+    'The grey pills along the top of the form show what you answered in step 1. Click “Change” next to them to go back and answer differently.',
+  ],
+};
+const ANSWERED_SECTION = {
+  h: 'Answers you gave in step 1',
+  p: 'These were asked before you reached this form, which is why you will not find boxes for them here:',
+  bullets: [
+    'Whether the loan has a moratorium — a “rest period” at the start when the borrower does not repay yet. How many months it lasts is asked on this form.',
+    'Whether the payment style changes during the loan. No means one style throughout; Yes gives you the Payment Layers table instead.',
+    'Which payment style it is — only asked when the style does NOT change.',
+    'Click “Change” at the top of the form to revisit any of them.',
+  ],
+};
+
 const IDP_SECTION = {
   h: 'Interest During Moratorium Period',
   p: 'Even during the rest period, interest keeps growing. For each month, click the box to tell the system what to do with that month’s interest. Click again to change it.',
@@ -28,7 +48,7 @@ const REFERENCE_SECTION = {
 };
 const DOWNLOADS_SECTION = {
   h: 'Results & Downloads',
-  p: 'Press Calculate ERR to see three numbers: ERR (the real yearly return), NIM (the bank’s interest margin), and Net Interest Income (the money earned). Below the results you can download:',
+  p: 'There is no Calculate button. As soon as the form has enough to work with, the right-hand side fills in by itself and keeps up with every change you make — so you can nudge the rate and watch the return move. Until it has enough, it simply tells you what is still missing. You get ERR (the real yearly return), NIM (the bank’s interest margin) and Net Interest Income (the money earned), and below them you can download:',
   bullets: [
     'The full payment Schedule as Excel, Word, or PDF.',
     'A Report PDF that summarises the inputs and results.',
@@ -37,19 +57,53 @@ const DOWNLOADS_SECTION = {
 };
 
 const MANUALS = {
+  // Shown while the user is on the landing screen or answering the step-1 questions.
+  home: {
+    title: 'Effective Rate of Return Calculator',
+    intro: 'This tool works out what a loan really earns the bank — its Effective Rate of Return. Start by picking one of the two modules.',
+    sections: [
+      {
+        h: 'Which module do I want?',
+        p: 'Two choices, and the difference is simply whether the loan already exists:',
+        bullets: [
+          'Loan Facilities — you are pricing a NEW facility and want to know what it would earn.',
+          'Rate Revision — the facility is already running and its interest rate has changed since it was given out.',
+        ],
+      },
+      FLOW_SECTION,
+      {
+        h: 'The questions you will be asked',
+        p: 'Two or three short ones, and they decide which form you land on:',
+        bullets: [
+          'Does the loan have a moratorium period? A moratorium is a “rest period” at the start when the borrower does not repay yet.',
+          'Does the payment have multiple layers? Say Yes if the borrower pays one way for part of the loan and a different way later on — for example EMI for the first year, then something else.',
+          'Payment Modality — only asked when there is just ONE style for the whole loan, because a layered loan carries a style per layer instead.',
+        ],
+      },
+      {
+        h: 'Rate Revision asks one thing first',
+        p: 'Before the questions, Rate Revision asks how you want to give it the loan:',
+        bullets: [
+          'Enter the loan details — you have the original terms and the rate changes, and the system rebuilds the schedule for you.',
+          'Upload an existing schedule — you already have the finished payment schedule in a file, so none of the questions apply.',
+        ],
+      },
+    ],
+  },
+
   regular: {
-    title: 'Loan Facilities — Structured',
-    intro: 'This page finds the real yearly return (ERR) on a normal loan that is paid back in equal, regular installments. Fill the boxes from top to bottom, then press Calculate ERR.',
+    title: 'Loan Facilities — one payment style',
+    intro: 'You said the loan is paid back the same way from start to finish. Fill the boxes from the top down; the schedule and the return build themselves on the right as you go.',
     sections: [
       { h: 'Loan Amount', p: 'The total money the bank hands over to the borrower. Type the whole amount, for example 100,000,000.' },
       { h: 'Offered Rate', p: 'The yearly interest the bank charges, like 12%. Think of it as the price the borrower pays for using the money for one year.' },
-      { h: 'Moratorium Available?', p: 'A moratorium is a “rest period” at the very start, when the borrower does not pay the loan back yet. Pick Yes if there is one, otherwise No. If you pick Yes, a box appears for how many months it lasts.' },
-      { h: 'Moratorium Period (Months)', p: 'How many months the rest period lasts. For example, 6 means the first 6 months are the rest period.' },
+      ANSWERED_SECTION,
+      { h: 'Moratorium Period (Months)', p: 'How many months the rest period lasts. For example, 6 means the first 6 months are the rest period. It only appears when you said there IS a moratorium.' },
       IDP_SECTION,
       { h: 'Loan Tenor (Months)', p: 'The total life of the loan in months, counting the rest period too. For example, 60 means the loan lasts 5 years.' },
       {
-        h: 'Payment Mode',
-        p: 'How the borrower pays the loan back after the rest period:',
+        h: 'Payment Mode — chosen in step 1',
+        p: 'You picked this before reaching the form, so there is no box for it here; use “Change” at the top to swap it. The choices mean:',
         bullets: [
           'EMI — the same total amount every month.',
           'EQI — the same total amount every 3 months.',
@@ -94,13 +148,13 @@ const MANUALS = {
   },
 
   customized: {
-    title: 'Loan Facilities — Customized',
-    intro: 'Same idea as Loan Facilities — Structured, but here the borrower can pay in different ways during different parts of the loan. You build “Payment Layers” to describe that.',
+    title: 'Loan Facilities — payment layers',
+    intro: 'You said the payment style changes during the loan, so instead of one modality you build “Payment Layers” — one row per stretch of the loan, each with its own style.',
     sections: [
       { h: 'Loan Amount', p: 'The total money the bank hands over to the borrower. Type the whole amount, for example 100,000,000.' },
       { h: 'Offered Rate', p: 'The yearly interest the bank charges, like 12% — the price of borrowing for one year.' },
-      { h: 'Moratorium Available?', p: 'A “rest period” at the start where no repayment happens yet. Pick Yes or No; Yes reveals a box for how many months it lasts.' },
-      { h: 'Moratorium Period (Months)', p: 'How many months the rest period lasts.' },
+      ANSWERED_SECTION,
+      { h: 'Moratorium Period (Months)', p: 'How many months the rest period lasts. It only appears when you said there IS a moratorium.' },
       IDP_SECTION,
       { h: 'Loan Tenor (Months)', p: 'The total life of the loan in months, including the rest period.' },
       {
@@ -111,7 +165,9 @@ const MANUALS = {
           'Layers must line up neatly — no gaps and no overlaps. The system helps you keep them in order.',
           '“Customized Principal” lets you type exactly how much principal is paid each month in that range.',
           '“Interest & Principal (Separate Frequency)” lets that range pay interest and principal on different months — pick the two frequencies in the Interest Freq. and Principal Freq. boxes on the layer. Custom Principal then means the amount paid on EACH principal date; leave it blank to split the balance evenly.',
-          'If a layer uses that style, a row of month boxes appears below the table for setting each month’s interest. Months belonging to other layers are greyed out, because their own payment style decides what happens to them.',
+          'A layer only shows the boxes its own style can use — an EMI layer has no frequency or Custom Principal boxes at all, because they would mean nothing there.',
+          'If any layer uses that style, month boxes appear below the table for setting each month’s interest. Only the months belonging to those layers are shown; the rest are left out, because their own payment style already decides what happens to them.',
+          'On a narrow screen the table becomes one card per layer, with each box labelled down the side.',
         ],
       },
       { h: 'Total Cost of Fund (COF/ISC + OPEX)', p: 'What the money costs the bank plus running costs, as a yearly rate. The earning is the gap between the Offered Rate and this.' },
@@ -129,14 +185,15 @@ const MANUALS = {
   },
 
   revisionStructured: {
-    title: 'Rate Revision — Structured',
-    intro: 'Use this when a loan’s interest rate CHANGES over time (a “rate revision”). You list each rate, add any security, and upload the bank’s monthly cost-of-fund file. The system rebuilds the whole schedule and finds the ERR.',
+    title: 'Rate Revision — from the loan details',
+    intro: 'You chose to give the original terms rather than upload a finished schedule. List each rate and the day it started, add any security, and upload the bank’s monthly cost-of-fund file — the system rebuilds the whole schedule and finds the ERR.',
     sections: [
       { h: 'Initial Loan Amount', p: 'The starting loan money, for example 100,000,000.' },
       { h: 'Disbursement Date', p: 'The day the loan money was handed out. Everything is counted from this day. It cannot be a Friday or Saturday.' },
-      { h: 'Moratorium Given at Disbursement?', p: 'Whether there is a “rest period” at the start, and (if Yes) how many months it lasts.' },
+      ANSWERED_SECTION,
+      { h: 'Moratorium Period (Months)', p: 'How many months the rest period lasts. It only appears when you said there IS a moratorium.' },
       IDP_SECTION,
-      { h: 'Payment Modality', p: 'How the borrower pays after the rest period — EMI (every month), EQI (every 3 months), Equal Principal + Interest, or “Interest & Principal (Separate Frequency)” when interest and principal fall on different months. Picking the last one swaps the rest-period boxes for the same frequency boxes and month grid used on the Structured page, and a rate change part-way through a month is split across that month by day count — the new rate then applies for the rest of the loan.' },
+      { h: 'Payment Modality — chosen in step 1', p: 'Picked before you reached this form; use “Change” at the top to swap it. It sets how the borrower pays after the rest period — EMI (every month), EQI (every 3 months), Equal Principal + Interest, or “Interest & Principal (Separate Frequency)” when interest and principal fall on different months. Picking the last one swaps the rest-period boxes for the same frequency boxes and month grid used on the Structured page, and a rate change part-way through a month is split across that month by day count — the new rate then applies for the rest of the loan.' },
       { h: 'Loan Tenor including Moratorium (Months)', p: 'The total months of the loan, counting the rest period.' },
       {
         h: 'Lending Rate Layers',
@@ -160,8 +217,8 @@ const MANUALS = {
   },
 
   revisionCustomized: {
-    title: 'Rate Revision — Customized',
-    intro: 'Use this when you already have the full payment schedule in a file (with all the rate changes already worked out). You upload it, add security and cost-of-fund data, and the system finds the ERR.',
+    title: 'Rate Revision — from an uploaded schedule',
+    intro: 'You already have the full payment schedule in a file, with the rate changes worked out. Upload it, add security and cost-of-fund data, and the system finds the ERR. None of the step-1 questions apply here, which is why you were not asked them.',
     sections: [
       {
         h: 'Upload Amortization Schedule + COF Layers',
@@ -175,7 +232,7 @@ const MANUALS = {
       REFERENCE_SECTION,
       {
         h: 'Results & Downloads',
-        p: 'Press Calculate ERR to see the ERR, NIM and Net Interest Income. Then download the schedule, a Report PDF, or the Verify Calculation Excel that shows every formula — including a sheet with your Loan Security and COF layer tables.',
+        p: 'The ERR, NIM and Net Interest Income appear on the right as soon as the file is uploaded — there is no Calculate button. Then download the schedule, a Report PDF, or the Verify Calculation Excel that shows every formula — including a sheet with your Loan Security and COF layer tables.',
       },
     ],
   },
