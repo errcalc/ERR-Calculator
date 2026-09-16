@@ -6,7 +6,7 @@
 // that with two modules and a handful of questions the RM can actually answer; the answers
 // decide which form they land on, and are carried into it so nothing is asked twice.
 // ============================================================
-import { el, optionField } from './components.js?v=20260917h';
+import { el, optionField } from './components.js?v=20260917j';
 
 export const MODALITIES = [
   'EMI', 'EQI',
@@ -89,9 +89,9 @@ export function renderQuestions(root, ctx, go) {
     onChange: () => refresh(),
   });
 
-  const moraRow = el('div', { class: 'form-row one' }, mora);
-  const layersRow = el('div', { class: 'form-row one' }, layers);
-  const modalityRow = el('div', { class: 'form-row one' }, modality);
+  const moraRow = el('div', { class: 'form-row' }, mora);
+  const layersRow = el('div', { class: 'form-row' }, layers);
+  const modalityRow = el('div', { class: 'form-row' }, modality);
 
   const contBtn = el('button', { class: 'primary-btn', type: 'button' }, 'Continue');
 

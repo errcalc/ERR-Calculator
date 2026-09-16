@@ -384,15 +384,19 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 /* form grid */
+/* One field per row. The old two-up grid came from the days when the form WAS the page at
+   780px; inside a 596px pane it just produced cramped pairs and, wherever a field was lifted
+   onto the question screen, a lone box sitting next to a gap. */
 .form-row {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: 1fr;
   gap: 12px 14px;
   margin-bottom: 12px;
 }
-.form-row.three { grid-template-columns: repeat(3, 1fr); }
-.form-row.one { grid-template-columns: 1fr; }
-.form-row.full { grid-template-columns: 1fr; margin-bottom: 12px; }
+.form-row.full { margin-bottom: 12px; }
+/* Rows built empty and filled later (the security detail row) would otherwise leave
+   their bottom margin behind as a gap. */
+.form-row:empty { display: none; }
 
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field label {
