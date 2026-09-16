@@ -1,22 +1,32 @@
-// App controller: tabs, theme, compare view
-import { el, openModal, closeModal, toast, optionField } from './components.js?v=20260916a';
+// App controller: screen routing, theme, compare view
+import { el, openModal, closeModal, toast, optionField } from './components.js?v=20260917a';
 import {
   renderRegularLoan, renderCustomizedLoan,
   renderRateRevisionStructured, renderRateRevisionCustomized,
-} from './pages.js?v=20260916a';
-import { listSummaries, deleteSummary } from './storage.js?v=20260916a';
-import { formatPercent, formatMoney, formatNumber } from './formatting.js?v=20260916a';
-import { openManual } from './manual.js?v=20260916a';
+} from './pages.js?v=20260917a';
+import { renderLanding, renderRevisionChoice, renderQuestions, answerSummary } from './screens.js?v=20260917a';
+import { listSummaries, deleteSummary } from './storage.js?v=20260917a';
+import { formatPercent, formatMoney, formatNumber } from './formatting.js?v=20260917a';
+import { openManual } from './manual.js?v=20260917a';
 
 const root = document.getElementById('app-root');
 const compareBtn = document.getElementById('compare-btn');
-const tabNav = document.getElementById('tab-nav');
 
+// Keyed by pageType, which saved summaries and the user guide still key off.
 const TABS = {
   regular: { label: 'Loan Facilities — Structured', render: renderRegularLoan, group: 'loan' },
   customized: { label: 'Loan Facilities — Customized', render: renderCustomizedLoan, group: 'loan' },
   revisionStructured: { label: 'Rate Revision — Structured', render: renderRateRevisionStructured, group: 'revision' },
   revisionCustomized: { label: 'Rate Revision — Customized', render: renderRateRevisionCustomized, group: 'revision' },
+};
+
+// module + mode -> which form to mount. The RM never sees these names; they are the answer
+// to "multiple payment layers?" and to the Rate Revision fork.
+const FORM_KEY = {
+  'loan/structured': 'regular',
+  'loan/customized': 'customized',
+  'revision/structured': 'revisionStructured',
+  'revision/upload': 'revisionCustomized',
 };
 
 // ---------------- Theme toggle ----------------
@@ -37,10 +47,10 @@ document.getElementById('theme-toggle').addEventListener('click', () => {
 });
 
 // ---------------- Brand back to first tab ----------------
-document.getElementById('brand-home').addEventListener('click', () => navigate('regular'));
+document.getElementById('brand-home').addEventListener('click', () => go({ screen: 'landing' }));
 
 // ---------------- Info button → per-module user guide ----------------
-document.getElementById('info-btn').addEventListener('click', () => openManual(TABS[currentTab] ? currentTab : 'regular'));
+document.getElementById('info-btn').addEventListener('click', () => openManual(TABS[formKey()] ? formKey() : 'regular'));
 
 // ---------------- Compare button visibility ----------------
 function refreshCompareVisibility() {
@@ -52,26 +62,49 @@ function refreshCompareVisibility() {
 }
 window.addEventListener('summary-saved', refreshCompareVisibility);
 window.addEventListener('summary-deleted', refreshCompareVisibility);
-compareBtn.addEventListener('click', () => navigate('compare'));
+compareBtn.addEventListener('click', () => go({ screen: 'compare' }));
 
 // ---------------- Router ----------------
-let currentTab = null;
-function navigate(tab) {
-  if (!TABS[tab] && tab !== 'compare') tab = 'regular';
-  currentTab = tab;
-  tabNav.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.tab === tab);
-  });
+// One view object drives every screen: landing -> (revisionChoice) -> questions -> form.
+let view = { screen: 'landing', module: null, mode: null, answers: null };
+const formKey = () => FORM_KEY[`${view.module}/${view.mode}`] || 'regular';
+
+function go(next) {
+  view = { ...view, ...next };
+  // Merging keeps answers alive across "Change", but stepping back out of a flow must drop
+  // them — otherwise the next run inherits the last one's moratorium and modality.
+  if (view.screen === 'landing') view = { screen: 'landing', module: null, mode: null, answers: null };
+  if (view.screen === 'revisionChoice') view = { ...view, mode: null, answers: null };
   window.scrollTo({ top: 0, behavior: 'instant' });
-  if (tab === 'compare') {
-    renderCompare();
-  } else {
-    TABS[tab].render(root);
+  render();
+}
+
+function render() {
+  switch (view.screen) {
+    case 'landing': return renderLanding(root, go);
+    case 'revisionChoice': return renderRevisionChoice(root, go);
+    case 'questions': return renderQuestions(root, view, go);
+    case 'compare': return renderCompare();
+    case 'form': return renderForm();
+    default: return renderLanding(root, go);
   }
 }
-tabNav.querySelectorAll('.tab-btn').forEach((btn) => {
-  btn.addEventListener('click', () => navigate(btn.dataset.tab));
-});
+
+function renderForm() {
+  root.innerHTML = '';
+  const key = formKey();
+  // Upload-driven revisions never answered any questions, so there is nothing to read back.
+  if (view.answers) {
+    root.appendChild(answerSummary(view, () => go({ screen: 'questions' })));
+  } else {
+    const back = el('button', { class: 'back-link', type: 'button' }, '← Back');
+    back.addEventListener('click', () => go({ screen: 'revisionChoice' }));
+    root.appendChild(el('div', { class: 'screen-head' }, back));
+  }
+  const host = el('div');
+  root.appendChild(host);
+  TABS[key].render(host, view.answers);
+}
 
 // ---------------- Compare view ----------------
 const PRETTY_KEY = {
@@ -108,7 +141,7 @@ function renderCompare() {
     el('h1', {}, 'Compare Saved Summaries'),
     (() => {
       const b = el('button', { class: 'back-link', type: 'button' }, '← Back');
-      b.addEventListener('click', () => navigate('regular'));
+      b.addEventListener('click', () => go({ screen: 'landing' }));
       return b;
     })(),
   ));
@@ -197,4 +230,4 @@ function buildCompareCol(s, refresh) {
 // ---------------- Boot ----------------
 initTheme();
 refreshCompareVisibility();
-navigate('regular');
+go({ screen: 'landing' });
