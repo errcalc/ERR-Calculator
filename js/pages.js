@@ -52,6 +52,23 @@ function installmentSecurityOption(kind, hasMoratorium) {
   return { value: `${kind} after Moratorium`, label: hasMoratorium ? `${kind} after Moratorium` : `${kind} Installment` };
 }
 
+// What the chosen security is CALLED on screen. The stored value never changes (saved
+// calculations, validation, metrics and the exports all key on it) — this is display only.
+export function securityDisplayName(type, hasMoratorium) {
+  if (type === 'EMI after Moratorium' || type === 'EQI after Moratorium') {
+    return installmentSecurityOption(type.slice(0, 3), hasMoratorium).label;
+  }
+  return type || 'Funded Security';
+}
+
+// Once a security type is picked, its two fields are named after THAT type — "FDR Amount",
+// not a slash-list of every option the user already chose between.
+function labelSecurityFields(type, hasMoratorium, csAmount, csRate) {
+  const name = securityDisplayName(type, hasMoratorium);
+  if (csAmount) csAmount.setLabel(`${name} Amount`);
+  if (csRate) csRate.setLabel(`${name} Rate`);
+}
+
 function setTwoLineLabel(field, line1, line2) {
   const lbl = field.querySelector('label');
   if (!lbl) return;
@@ -258,8 +275,9 @@ export function renderRegularLoan(root, pre = null) {
   });
   setTwoLineLabel(fundedSecurityType, 'Funded Security', 'Type');
 
-  const csAmount = numberField({ label: 'Cash Security / FDR Amount', name: 'csAmount' });
-  const csRate = percentField({ label: 'Cash Security / FDR Rate', name: 'csRate' });
+  // Renamed after the chosen security type by labelSecurityFields(); these are placeholders.
+  const csAmount = numberField({ label: 'Security Amount', name: 'csAmount' });
+  const csRate = percentField({ label: 'Security Rate', name: 'csRate' });
   const numInst = numberField({ label: 'Number of Installments', name: 'numInst', integerOnly: true, min: 1 });
 
   section.appendChild(el('div', { class: 'form-row' }, loanAmount, offeredRate));
@@ -279,8 +297,8 @@ export function renderRegularLoan(root, pre = null) {
   section.appendChild(splitSection);
   section.appendChild(el('div', { class: 'form-row' }, totalCof, fundedSecurityType));
   // Security detail row — fields depend on Funded Security Type (rebuilt in refresh()):
-  //   FDR / Cash Security       -> Cash Security / FDR Amount + Cash Security / FDR Rate
-  //   EMI/EQI after Moratorium  -> Number of Installments + Funded Security Rate
+  //   FDR / Cash Security       -> Amount + Rate, both named after the chosen type
+  //   EMI/EQI / Installment     -> Number of Installments + that type's Rate
   //   Installment               -> Number of Installments
   const secDetailRow = el('div', { class: 'form-row' });
   section.appendChild(secDetailRow);
@@ -288,17 +306,10 @@ export function renderRegularLoan(root, pre = null) {
     const t = fundedSecurityType.getValue();
     secDetailRow.innerHTML = '';
     if (!t || t === 'No Funded Security') return; // No Funded Security => no detail fields, security = 0
-    if (t === 'FDR' || t === 'Cash Security') {
-      csRate.setLabel('Cash Security / FDR Rate');
-      secDetailRow.append(csAmount, csRate);
-    } else if (t === 'EMI after Moratorium' || t === 'EQI after Moratorium') {
-      csRate.setLabel('Funded Security Rate');
-      secDetailRow.append(numInst, csRate);
-    } else {
-      // "Installment" funded security (Equal-Principal loans): Number of Installments + its rate
-      csRate.setLabel('Funded Security Rate');
-      secDetailRow.append(numInst, csRate);
-    }
+    labelSecurityFields(t, moratoriumAvail.getValue() === 'Yes', csAmount, csRate);
+    // Cash-backed securities state an amount; installment-built ones state how many instalments.
+    if (t === 'FDR' || t === 'Cash Security') secDetailRow.append(csAmount, csRate);
+    else secDetailRow.append(numInst, csRate);
   }
 
   function refresh() {
@@ -436,6 +447,8 @@ function collectRegularInputs(f) {
   };
 }
 
+const secName = (i) => securityDisplayName(i.fundedSecurityType, i.moratoriumAvail === 'Yes');
+
 function validateRegular(i) {
   if (!i.loanAmount) return fail('Enter Loan Amount.');
   if (i.offeredRate === null) return fail('Enter Offered Rate.');
@@ -461,7 +474,7 @@ function validateRegular(i) {
     if (!i.fundedSecurityType) return fail('Select a Funded Security Type.');
     if ((i.fundedSecurityType === 'FDR' || i.fundedSecurityType === 'Cash Security')
         && (i.csRate === null || i.csAmount === null))
-      return fail('Enter Cash Security / FDR Amount and Rate.');
+      return fail(`Enter ${secName(i)} Amount and Rate.`);
     return null;
   }
   if (!i.moratoriumAvail) return fail('Select whether a moratorium is available.');
@@ -470,8 +483,8 @@ function validateRegular(i) {
   if (i.totalCof === null) return fail('Enter Total Cost of Fund.');
   if (!i.fundedSecurityType) return fail('Select a Funded Security Type.');
   if (i.fundedSecurityType === 'FDR' || i.fundedSecurityType === 'Cash Security') {
-    if (i.csRate === null) return fail('Enter Cash Security / FDR Rate.');
-    if (i.csAmount === null) return fail('Enter Cash Security / FDR Amount.');
+    if (i.csRate === null) return fail(`Enter ${secName(i)} Rate.`);
+    if (i.csAmount === null) return fail(`Enter ${secName(i)} Amount.`);
   }
   if (['EMI after Moratorium', 'EQI after Moratorium', 'Installment'].includes(i.fundedSecurityType) && !i.numInst)
     return fail('Enter Number of Installments.');
@@ -649,8 +662,9 @@ export function renderCustomizedLoan(root, pre = null) {
     options: customizedSecurityOptions(), value: '', onChange: refresh,
   });
   setTwoLineLabel(fundedSecurityType, 'Funded Security', 'Type');
-  const csAmount = numberField({ label: 'Cash Security / FDR Amount', name: 'csAmount' });
-  const csRate = percentField({ label: 'Cash Security / FDR Rate', name: 'csRate' });
+  // Renamed after the chosen security type by labelSecurityFields(); these are placeholders.
+  const csAmount = numberField({ label: 'Security Amount', name: 'csAmount' });
+  const csRate = percentField({ label: 'Security Rate', name: 'csRate' });
   const numInst = numberField({ label: 'Number of Installments', name: 'numInst', integerOnly: true, min: 1 });
 
   section.appendChild(el('div', { class: 'form-row' }, loanAmount, offeredRate));
@@ -669,17 +683,10 @@ export function renderCustomizedLoan(root, pre = null) {
     const t = fundedSecurityType.getValue();
     secDetailRow.innerHTML = '';
     if (!t || t === 'No Funded Security') return; // No Funded Security => no detail fields, security = 0
-    if (t === 'FDR' || t === 'Cash Security') {
-      csRate.setLabel('Cash Security / FDR Rate');
-      secDetailRow.append(csAmount, csRate);
-    } else if (t === 'EMI after Moratorium' || t === 'EQI after Moratorium') {
-      csRate.setLabel('Funded Security Rate');
-      secDetailRow.append(numInst, csRate);
-    } else {
-      // "Installment" funded security (Equal-Principal loans): Number of Installments + its rate
-      csRate.setLabel('Funded Security Rate');
-      secDetailRow.append(numInst, csRate);
-    }
+    labelSecurityFields(t, moratoriumAvail.getValue() === 'Yes', csAmount, csRate);
+    // Cash-backed securities state an amount; installment-built ones state how many instalments.
+    if (t === 'FDR' || t === 'Cash Security') secDetailRow.append(csAmount, csRate);
+    else secDetailRow.append(numInst, csRate);
   }
 
   function refresh() {

@@ -1,6 +1,6 @@
 // Per-module user guide — opened from the info button in the header. Plain, simple language
 // (explained as if to a 10-year-old). Sections are collapsed by default; click to expand.
-import { el, openModal, closeModal } from './components.js?v=20260917k';
+import { el, openModal, closeModal } from './components.js?v=20260917l';
 
 // ---- Shared sections reused across modules ----
 const MODALITY_BULLETS = [
@@ -204,7 +204,7 @@ const MANUALS = {
           'EMI / EQI after Moratorium, or Installment — the safety is built up bit by bit in installments.',
         ],
       },
-      { h: 'Cash Security / FDR Amount & Rate', p: 'How much safety money is kept, and the rate the bank pays on it. The bank’s gain from this safety money is added to the return.' },
+      { h: 'The security’s Amount & Rate', p: 'These two boxes are named after whichever security you picked — choose FDR and they read “FDR Amount” and “FDR Rate”. Type how much safety money is kept and the rate the bank pays on it; the bank’s gain from it is added to the return.' },
       DOWNLOADS_SECTION,
     ],
   },
@@ -241,7 +241,7 @@ const MANUALS = {
           'EMI / EQI after Moratorium, or Installment — built up in installments.',
         ],
       },
-      { h: 'Cash Security / FDR Amount & Rate', p: 'How much safety money is kept and its rate. The bank’s gain from it is added to the return.' },
+      { h: 'The security’s Amount & Rate', p: 'Named after whichever security you picked — pick FDR and they read “FDR Amount” and “FDR Rate”. How much safety money is kept, and its rate. The bank’s gain from it is added to the return.' },
       DOWNLOADS_SECTION,
     ],
   },

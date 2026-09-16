@@ -1153,8 +1153,8 @@ function collectInputLinesFor(pageType, inp) {
       ['Total COF (COF/ISC + OPEX)', inp.totalCof ?? 0],
       ['Funded Security Type', securityTypeLabel(inp)],
       ['Number of Installments (security)', inp.numInst ?? 0],
-      ['Cash Security / FDR Amount', securityAmtFor(inp, 'derivedSecurityAmount') ?? (inp.csAmount ?? 0)],
-      ['Cash Security / FDR Rate', inp.csRate ?? 0],
+      [`${securityTypeLabel(inp) || 'Funded Security'} Amount`, securityAmtFor(inp, 'derivedSecurityAmount') ?? (inp.csAmount ?? 0)],
+      [`${securityTypeLabel(inp) || 'Funded Security'} Rate`, inp.csRate ?? 0],
     ];
   }
   if (pageType === 'customized') {
@@ -1170,8 +1170,8 @@ function collectInputLinesFor(pageType, inp) {
       ['Total COF (COF/ISC + OPEX)', inp.totalCof ?? 0],
       ['Funded Security Type', securityTypeLabel(inp)],
       ['Number of Installments (security)', inp.numInst ?? 0],
-      ['Cash Security / FDR Amount', securityAmtFor(inp, 'derivedSecurityAmount') ?? (inp.csAmount ?? 0)],
-      ['Cash Security / FDR Rate', inp.csRate ?? 0],
+      [`${securityTypeLabel(inp) || 'Funded Security'} Amount`, securityAmtFor(inp, 'derivedSecurityAmount') ?? (inp.csAmount ?? 0)],
+      [`${securityTypeLabel(inp) || 'Funded Security'} Rate`, inp.csRate ?? 0],
     ];
   }
   if (pageType === 'revisionStructured') {
