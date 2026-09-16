@@ -1,6 +1,17 @@
 // Excel / Word / PDF I/O via CDN libs
-import { formatMoney as fmtM, formatPercent as fmtP } from './formatting.js?v=20260908i';
-import { SPLIT_MODE } from './calculations.js?v=20260908i';
+import { formatMoney as fmtM, formatPercent as fmtP } from './formatting.js?v=20260916a';
+import { SPLIT_MODE } from './calculations.js?v=20260916a';
+
+// Funded Security as it READS on screen. The stored value is always "<kind> after Moratorium",
+// but on a loan with no moratorium the UI shows "<kind> Installment" — the workbook and the PDF
+// quote the same words so a reader is not left comparing two different names for one thing.
+function securityTypeLabel(inp) {
+  const v = String(inp.fundedSecurityType || '');
+  const m = v.match(/^(EMI|EQI) after Moratorium$/);
+  if (!m) return v;
+  const hasMora = inp.moratoriumAvail === 'Yes' || inp.moratoriumAvail === true;
+  return hasMora ? v : `${m[1]} Installment`;
+}
 
 // True when this calculation uses the split interest/principal type, on any of the three pages.
 function isSplitCtx(inp) {
@@ -1140,7 +1151,7 @@ function collectInputLinesFor(pageType, inp) {
       ['Loan Tenor including Moratorium (Months)', inp.loanTenor ?? 0],
       ['Payment Mode', inp.paymentMode ?? ''],
       ['Total COF (COF/ISC + OPEX)', inp.totalCof ?? 0],
-      ['Funded Security Type', inp.fundedSecurityType ?? ''],
+      ['Funded Security Type', securityTypeLabel(inp)],
       ['Number of Installments (security)', inp.numInst ?? 0],
       ['Cash Security / FDR Amount', securityAmtFor(inp, 'derivedSecurityAmount') ?? (inp.csAmount ?? 0)],
       ['Cash Security / FDR Rate', inp.csRate ?? 0],
@@ -1157,7 +1168,7 @@ function collectInputLinesFor(pageType, inp) {
         + ((inp.paymentLayers || []).filter(L => L.paymentType === SPLIT_MODE)
             .map(L => ` — months ${L.fromInstallment}-${L.toInstallment}: ${L.intFreq} interest / ${L.prinFreq} principal`).join('') || '')],
       ['Total COF (COF/ISC + OPEX)', inp.totalCof ?? 0],
-      ['Funded Security Type', inp.fundedSecurityType ?? ''],
+      ['Funded Security Type', securityTypeLabel(inp)],
       ['Number of Installments (security)', inp.numInst ?? 0],
       ['Cash Security / FDR Amount', securityAmtFor(inp, 'derivedSecurityAmount') ?? (inp.csAmount ?? 0)],
       ['Cash Security / FDR Rate', inp.csRate ?? 0],

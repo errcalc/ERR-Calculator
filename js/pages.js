@@ -3,23 +3,23 @@ import {
   el, numberField, percentField, optionField, dateField, textField,
   monthBoxesField, layeredField, securityLayersField, rateLayersField, toast, parseDDMMMYYYY, formatDDMMMYYYY,
   openModal, closeModal,
-} from './components.js?v=20260908i';
-import { isoToDDMMMYYYY } from './formatting.js?v=20260908i';
+} from './components.js?v=20260916a';
+import { isoToDDMMMYYYY } from './formatting.js?v=20260916a';
 import {
   buildStructuredSchedule, buildCustomizedSchedule,
   buildRateRevisionStructured, computeMetrics,
   buildSplitSchedule, principalPaymentMonths, SPLIT_MODE, FREQ, FREQ_NAMES,
   computeRevisionMetrics, computeRevisionCustomizedMetrics, buildCofData,
   addMonthsDue,
-} from './calculations.js?v=20260908i';
-import { formatMoney, formatPercent, formatNumber } from './formatting.js?v=20260908i';
-import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20260908i';
+} from './calculations.js?v=20260916a';
+import { formatMoney, formatPercent, formatNumber } from './formatting.js?v=20260916a';
+import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20260916a';
 import {
   downloadScheduleAsExcel, downloadSampleAmortization, readUploadedSchedule,
   downloadScheduleAsWord, downloadScheduleAsPDF, downloadVerificationExcel, downloadReportPDF,
   downloadCofSample, readUploadedCof,
   downloadCustomizedRevisionSample, readCustomizedRevisionFile,
-} from './excel.js?v=20260908i';
+} from './excel.js?v=20260916a';
 
 // Cached page state by tab key (also persisted via storage saveDraft)
 const tabState = {};
@@ -43,6 +43,13 @@ function principalScheduleHint(months, periodMonths) {
     : months.slice(0, 6).map(pad).join(', ') + ', … , ' + pad(months[n - 1]);
   const every = `every ${periodMonths} months`;
   return `First principal payment at the end of Month ${pad(months[0])}, then ${every} — ${shown} (${plural}).`;
+}
+
+// Installment-sized funded security. Its stored value is always "<kind> after Moratorium" —
+// validation, computeMetrics and the exports all match on that string — but on a loan with no
+// moratorium that label names a period that does not exist, so only the display text changes.
+function installmentSecurityOption(kind, hasMoratorium) {
+  return { value: `${kind} after Moratorium`, label: hasMoratorium ? `${kind} after Moratorium` : `${kind} Installment` };
 }
 
 function setTwoLineLabel(field, line1, line2) {
@@ -234,8 +241,10 @@ export function renderRegularLoan(root) {
     // The split type has no single installment to size a security against (the legs pay on
     // different months and the amounts are uneven), so only the cash-backed options apply.
     if (pm === SPLIT_MODE) return [{ label: '— select —', value: '' }, ...opts];
-    if (pm === 'EMI') opts.push('EMI after Moratorium');
-    else if (pm === 'EQI') opts.push('EQI after Moratorium');
+    // "after Moratorium" names a period the loan may not have. The VALUE never changes (saved
+    // calculations, validation, metrics and the exports all key on it) — only the label does.
+    if (pm === 'EMI') opts.push(installmentSecurityOption('EMI', moratoriumAvail.getValue() === 'Yes'));
+    else if (pm === 'EQI') opts.push(installmentSecurityOption('EQI', moratoriumAvail.getValue() === 'Yes'));
     else if (pm) opts.push('Installment');
     return [{ label: '— select —', value: '' }, ...opts];
   }
@@ -602,9 +611,14 @@ export function renderCustomizedLoan(root) {
 
   const totalCof = percentField({ label: 'Total Cost of Fund [COF/ISC + OPEX]', name: 'totalCof' });
   setTwoLineLabel(totalCof, 'Total Cost of Fund', '(COF/ISC + OPEX)');
+  function customizedSecurityOptions() {
+    const moraYes = moratoriumAvail.getValue() === 'Yes';
+    return [{ label: '— select —', value: '' }, 'No Funded Security', 'FDR', 'Cash Security',
+      installmentSecurityOption('EMI', moraYes), installmentSecurityOption('EQI', moraYes)];
+  }
   const fundedSecurityType = optionField({
     label: 'Funded Security Type', name: 'fundedSecurityType',
-    options: [{ label: '— select —', value: '' }, 'No Funded Security', 'FDR', 'Cash Security', 'EMI after Moratorium', 'EQI after Moratorium'], value: '', onChange: refresh,
+    options: customizedSecurityOptions(), value: '', onChange: refresh,
   });
   setTwoLineLabel(fundedSecurityType, 'Funded Security', 'Type');
   const csAmount = numberField({ label: 'Cash Security / FDR Amount', name: 'csAmount' });
@@ -647,6 +661,9 @@ export function renderCustomizedLoan(root) {
     moraSection.classList.toggle('hidden', months === 0);
     if (months > 0) idpField.refresh();
     loanTenor.setLabel(moraYes ? 'Loan Tenor including Moratorium (Months)' : 'Loan Tenor (Months)');
+    // Relabel the installment-sized security options when the moratorium is toggled
+    // (setOptions keeps the current selection, since only the label changes).
+    fundedSecurityType.setOptions(customizedSecurityOptions());
     rebuildSecurityRow();
   }
   refresh();
