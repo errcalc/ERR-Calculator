@@ -122,7 +122,7 @@ export function renderRegularLoan(root) {
 
   const moratoriumAvail = optionField({
     label: 'Moratorium Available?', name: 'moratoriumAvail',
-    options: [{ label: '— select —', value: '' }, 'No', 'Yes'], value: '',
+    options: [{ label: 'select', value: '' }, 'No', 'Yes'], value: '',
     onChange: refresh,
   });
   const moratoriumPeriod = numberField({
@@ -139,7 +139,7 @@ export function renderRegularLoan(root) {
   loanTenor.input.addEventListener('input', () => refresh());
   const paymentMode = optionField({
     label: 'Payment Mode', name: 'paymentMode',
-    options: [{ label: '— select —', value: '' }, 'EMI', 'EQI', 'Equal Principal + Interest (Monthly)', 'Equal Principal + Interest (Quarterly)', SPLIT_MODE],
+    options: [{ label: 'select', value: '' }, 'EMI', 'EQI', 'Equal Principal + Interest (Monthly)', 'Equal Principal + Interest (Quarterly)', SPLIT_MODE],
     value: '',
     onChange: () => refresh(),
   });
@@ -240,13 +240,13 @@ export function renderRegularLoan(root) {
     const opts = ['No Funded Security', 'FDR', 'Cash Security'];
     // The split type has no single installment to size a security against (the legs pay on
     // different months and the amounts are uneven), so only the cash-backed options apply.
-    if (pm === SPLIT_MODE) return [{ label: '— select —', value: '' }, ...opts];
+    if (pm === SPLIT_MODE) return [{ label: 'select', value: '' }, ...opts];
     // "after Moratorium" names a period the loan may not have. The VALUE never changes (saved
     // calculations, validation, metrics and the exports all key on it) — only the label does.
     if (pm === 'EMI') opts.push(installmentSecurityOption('EMI', moratoriumAvail.getValue() === 'Yes'));
     else if (pm === 'EQI') opts.push(installmentSecurityOption('EQI', moratoriumAvail.getValue() === 'Yes'));
     else if (pm) opts.push('Installment');
-    return [{ label: '— select —', value: '' }, ...opts];
+    return [{ label: 'select', value: '' }, ...opts];
   }
   const fundedSecurityType = optionField({
     label: 'Funded Security Type', name: 'fundedSecurityType', options: securityOptions(), value: '',
@@ -481,7 +481,7 @@ export function renderCustomizedLoan(root) {
 
   const loanAmount = numberField({ label: 'Loan Amount', name: 'loanAmount' });
   const offeredRate = percentField({ label: 'Offered Rate', name: 'offeredRate' });
-  const moratoriumAvail = optionField({ label: 'Moratorium Available?', name: 'moratoriumAvail', options: [{ label: '— select —', value: '' }, 'No', 'Yes'], value: '', onChange: refresh });
+  const moratoriumAvail = optionField({ label: 'Moratorium Available?', name: 'moratoriumAvail', options: [{ label: 'select', value: '' }, 'No', 'Yes'], value: '', onChange: refresh });
   const moratoriumPeriod = numberField({ label: 'Moratorium Period (Months)', name: 'moratoriumPeriod', integerOnly: true, min: 1 });
   moratoriumPeriod.input.addEventListener('input', () => { refresh(); refreshLayerOpts(); paymentLayers.applyLayerRules(); });
   const idpField = monthBoxesField({
@@ -495,7 +495,7 @@ export function renderCustomizedLoan(root) {
     const tenor = loanTenor.getValue() || 0;
     const mora = moratoriumAvail.getValue() === 'Yes' ? (moratoriumPeriod.getValue() || 0) : 0;
     const arr = [];
-    for (let i = mora + 1; i <= tenor; i++) arr.push({ value: String(i), label: `Month ${String(i).padStart(2, '0')}` });
+    for (let i = mora + 1; i <= tenor; i++) arr.push({ value: String(i), label: String(i).padStart(2, '0') });
     return arr;
   }
   // From and To share the same month list (mora+1 .. tenor) — mirrors the Lending Rate Layers
@@ -505,7 +505,7 @@ export function renderCustomizedLoan(root) {
     const tenor = loanTenor.getValue() || 0;
     const mora = moratoriumAvail.getValue() === 'Yes' ? (moratoriumPeriod.getValue() || 0) : 0;
     const arr = [];
-    for (let i = mora + 1; i <= tenor; i++) arr.push({ value: String(i), label: `Month ${String(i).padStart(2, '0')}` });
+    for (let i = mora + 1; i <= tenor; i++) arr.push({ value: String(i), label: String(i).padStart(2, '0') });
     return arr;
   }
 
@@ -513,9 +513,9 @@ export function renderCustomizedLoan(root) {
     label: 'Payment Layers',
     name: 'paymentLayers',
     schema: [
-      { key: 'fromInstallment', label: 'From Date', type: 'option', options: fromOptions, allowEmpty: true, placeholder: '', width: '0.8fr', readOnly: true },
-      { key: 'toInstallment', label: 'To Date', type: 'option', options: toOptions, allowEmpty: true, placeholder: '— select —', width: '0.8fr' },
-      { key: 'paymentType', label: 'Payment Type', type: 'option', allowEmpty: true, placeholder: '— select —', options: [
+      { key: 'fromInstallment', label: 'From Month', type: 'option', options: fromOptions, allowEmpty: true, placeholder: '', width: '0.8fr', readOnly: true },
+      { key: 'toInstallment', label: 'To Month', type: 'option', options: toOptions, allowEmpty: true, placeholder: 'select', width: '0.8fr' },
+      { key: 'paymentType', label: 'Payment Type', type: 'option', allowEmpty: true, placeholder: 'select', options: [
           'Customized Principal (Monthly)', 'Customized Principal (Quarterly)', 'EMI', 'EQI',
           'Equal Principal + Interest (Monthly)', 'Equal Principal + Interest (Quarterly)',
           SPLIT_MODE,
@@ -544,22 +544,21 @@ export function renderCustomizedLoan(root) {
     },
     allowFromEqualTo: true,
     onChange: () => {
+      syncOptionalColumns();
       paymentLayers.rows.forEach((row) => {
         const ptype = row.inputs.paymentType.value;
-        const cp = row.inputs.customPrincipal;
         const split = ptype === SPLIT_MODE;
         // Custom Principal: required for "Customized Principal", optional for the split type
         // (blank = divide equally), meaningless for EMI/EQI/Equal-Principal.
         const wantsCp = split || (!!ptype && ptype.startsWith('Customized Principal'));
-        cp.disabled = !wantsCp;
-        cp.style.opacity = wantsCp ? '1' : '0.4';
-        if (!wantsCp) cp.value = '';
-        [row.inputs.intFreq, row.inputs.prinFreq].forEach((f) => {
+        setCellActive(row, 'customPrincipal', wantsCp);
+        if (!wantsCp) row.inputs.customPrincipal.value = '';
+        [['intFreq', 'Monthly'], ['prinFreq', 'Quarterly']].forEach(([key, fallback]) => {
+          const f = row.inputs[key];
           if (!f) return;
-          f.disabled = !split;
-          f.style.opacity = split ? '1' : '0.4';
+          setCellActive(row, key, split);
           if (!split) f.value = '';
-          else if (!f.value) f.value = (f === row.inputs.intFreq) ? 'Monthly' : 'Quarterly';
+          else if (!f.value) f.value = fallback;
         });
       });
       refreshSplitGrid();
@@ -568,6 +567,26 @@ export function renderCustomizedLoan(root) {
   // Toast on the layered field's "cannot add" callback (e.g. last layer already ends at maturity)
   paymentLayers.onCannotAdd = (msg) => toast(msg, 'error');
   function refreshLayerOpts() { paymentLayers.refreshOptions(); }
+  // A column that no current layer can use is dropped from the grid rather than shown
+  // greyed out — a disabled box still reads as something to fill in. Each column reappears
+  // as soon as one layer needs it and stays while any layer still does, so a mixed set
+  // (EMI in one layer, split in another) shows them.
+  // A cell the row's own payment type can't use is left blank rather than greyed out: the
+  // column exists for whichever layers need it, so an empty cell reads as "not this layer".
+  function setCellActive(row, key, active) {
+    const inp = row.inputs[key];
+    if (inp) inp.disabled = !active;
+    if (row.cells && row.cells[key]) row.cells[key].classList.toggle('cell-na', !active);
+  }
+  function syncOptionalColumns() {
+    const types = paymentLayers.rows.map(r => r.inputs.paymentType.value || '');
+    const anySplit = types.some(t => t === SPLIT_MODE);
+    // Custom Principal serves the split type AND both "Customized Principal" types.
+    const anyCustomPrincipal = types.some(t => t === SPLIT_MODE || t.startsWith('Customized Principal'));
+    paymentLayers.setColumnHidden('intFreq', !anySplit);
+    paymentLayers.setColumnHidden('prinFreq', !anySplit);
+    paymentLayers.setColumnHidden('customPrincipal', !anyCustomPrincipal);
+  }
 
   // ---- Split interest/principal support -------------------------------------------------
   // One whole-tenor grid serves every split layer. Months belonging to other layer types are
@@ -613,7 +632,7 @@ export function renderCustomizedLoan(root) {
   setTwoLineLabel(totalCof, 'Total Cost of Fund', '(COF/ISC + OPEX)');
   function customizedSecurityOptions() {
     const moraYes = moratoriumAvail.getValue() === 'Yes';
-    return [{ label: '— select —', value: '' }, 'No Funded Security', 'FDR', 'Cash Security',
+    return [{ label: 'select', value: '' }, 'No Funded Security', 'FDR', 'Cash Security',
       installmentSecurityOption('EMI', moraYes), installmentSecurityOption('EQI', moraYes)];
   }
   const fundedSecurityType = optionField({
@@ -665,6 +684,7 @@ export function renderCustomizedLoan(root) {
     // (setOptions keeps the current selection, since only the label changes).
     fundedSecurityType.setOptions(customizedSecurityOptions());
     rebuildSecurityRow();
+    syncOptionalColumns();
   }
   refresh();
 
@@ -834,7 +854,7 @@ export function renderRateRevisionStructured(root) {
     onChange: () => rerunLayerRules(),
   });
 
-  const moratoriumAvail = optionField({ label: 'Moratorium Given at Disbursement?', name: 'moratoriumAvail', options: [{ label: '— select —', value: '' }, 'No', 'Yes'], value: '', onChange: refresh });
+  const moratoriumAvail = optionField({ label: 'Moratorium Given at Disbursement?', name: 'moratoriumAvail', options: [{ label: 'select', value: '' }, 'No', 'Yes'], value: '', onChange: refresh });
   const moratoriumPeriod = numberField({ label: 'Moratorium Period (Months)', name: 'moratoriumPeriod', integerOnly: true, min: 1 });
   moratoriumPeriod.input.addEventListener('input', refresh);
 
@@ -845,7 +865,7 @@ export function renderRateRevisionStructured(root) {
 
   const paymentModality = optionField({
     label: 'Payment Modality', name: 'paymentModality',
-    options: [{ label: '— select —', value: '' }, 'EMI', 'EQI', 'Equal Principal + Interest (Monthly)', 'Equal Principal + Interest (Quarterly)', SPLIT_MODE], value: '',
+    options: [{ label: 'select', value: '' }, 'EMI', 'EQI', 'Equal Principal + Interest (Monthly)', 'Equal Principal + Interest (Quarterly)', SPLIT_MODE], value: '',
     onChange: () => refresh(),
   });
   const tenorMonths = numberField({ label: 'Loan Tenor at Disbursement (Months)', name: 'tenorMonths', integerOnly: true, min: 1 });

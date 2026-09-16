@@ -420,8 +420,8 @@ export function formatDDMMMYYYY(d) {
 //   groupByYear   -> lay the boxes out in rows of 12 under Year 01, Year 02, ... so a long
 //                    tenor stays readable.
 //   disabledFn(i) -> true if month i+1 is outside this grid's remit (in Customized, a month
-//                    governed by a layer that is not the split type). Rendered inert and
-//                    greyed, never clickable, and its state is meaningless.
+//                    governed by a layer that is not the split type). Not drawn at all —
+//                    there is nothing to choose, so no box is offered.
 export function monthBoxesField({ name, getCount, tooltip = '', label = '', selectAll = true, capitalizable = false,
                                   lockedFn = null, defaultFn = null, groupByYear = false, disabledFn = null }) {
   const wrapper = el('div', { class: 'field' });
@@ -467,7 +467,10 @@ export function monthBoxesField({ name, getCount, tooltip = '', label = '', sele
   // vibrancy). A mix of states (or no boxes) fades all three — none is active.
   function updateBulkActive() {
     if (!bulkBtns[0]) return;
-    const uniform = states.length > 0 && states.every(s => s === states[0]) ? states[0] : null;
+    // Months outside the grid's remit are forced to 0 and never drawn, so they must not
+    // count towards "is every box the same?" — otherwise no bulk button ever lights up.
+    const live = states.filter((_, i) => !(disabledFn && disabledFn(i)));
+    const uniform = live.length > 0 && live.every(s => s === live[0]) ? live[0] : null;
     [0, 1, 2].forEach(s => { if (bulkBtns[s]) bulkBtns[s].classList.toggle('inactive', uniform !== s); });
   }
 
@@ -494,19 +497,21 @@ export function monthBoxesField({ name, getCount, tooltip = '', label = '', sele
         yr.appendChild(cursor);
         grid.appendChild(yr);
       }
-      const off = !!(disabledFn && disabledFn(i));
-      const locked = !off && !!(lockedFn && lockedFn(i));
-      const cls = off ? '' : (CLS[states[i]] || '');
+      // A month governed by a non-split layer has nothing to decide, so no box is drawn.
+      // `states` still carries every month, so the month numbers stay true and the
+      // engine's intFlags[m - 1] indexing is untouched.
+      if (disabledFn && disabledFn(i)) continue;
+      const locked = !!(lockedFn && lockedFn(i));
+      const cls = CLS[states[i]] || '';
       const box = el('div', {
-        class: 'month-box' + (cls ? ' ' + cls : '') + (locked ? ' locked' : '') + (off ? ' disabled' : ''),
+        class: 'month-box' + (cls ? ' ' + cls : '') + (locked ? ' locked' : ''),
         'data-month': i + 1,
-        title: off ? 'Governed by this month’s payment layer, not by this grid'
-             : locked ? 'Principal is paid this month, so its interest is always paid too' : '',
+        title: locked ? 'Principal is paid this month, so its interest is always paid too' : '',
       },
         el('div', { class: 'mb-num' }, String(i + 1).padStart(2, '0')),
         el('div', { class: 'mb-lbl' }, 'Month'),
       );
-      if (!locked && !off) {
+      if (!locked) {
         box.addEventListener('click', () => {
           touched.add(i);
           states[i] = (states[i] + 1) % (maxState + 1);
@@ -515,6 +520,8 @@ export function monthBoxesField({ name, getCount, tooltip = '', label = '', sele
       }
       (cursor || grid).appendChild(box);
     }
+    // A year whose every month belongs to another layer leaves an empty row behind.
+    grid.querySelectorAll('.mb-year').forEach((yr) => { if (!yr.querySelector('.month-box')) yr.remove(); });
     updateBulkActive();
   }
 
@@ -581,8 +588,19 @@ export function layeredField(opts) {
   const cols = schema.map(s => s.width || '1fr').join(' ');
 
   const header = el('div', { class: 'layer-header', style: `grid-template-columns: ${cols}` });
-  schema.forEach(s => header.appendChild(el('div', { class: 'layer-th' }, s.label)));
+  const ths = {};
+  schema.forEach((s) => { const th = el('div', { class: 'layer-th' }, s.label); ths[s.key] = th; header.appendChild(th); });
   layers.appendChild(header);
+
+  // Columns that are irrelevant to every current row are pulled out of the grid entirely
+  // rather than shown greyed out — a disabled box still reads as something to fill in.
+  const hiddenCols = new Set();
+  const visibleCols = () => schema.filter(s => !hiddenCols.has(s.key)).map(s => s.width || '1fr').join(' ');
+  function applyColumnLayout() {
+    const c = visibleCols();
+    header.style.gridTemplateColumns = c;
+    rows.forEach(r => { r.row.style.gridTemplateColumns = c; });
+  }
 
   const rows = [];
   function fireChange() {
@@ -594,26 +612,28 @@ export function layeredField(opts) {
   }
 
   function addRow(values = {}, opts = {}) {
-    const row = el('div', { class: 'layer-row', style: `grid-template-columns: ${cols}` });
+    const row = el('div', { class: 'layer-row', style: `grid-template-columns: ${visibleCols()}` });
     const inputs = {};
-    schema.forEach((s) => buildCell(s, row, inputs, values));
+    const cells = {};
+    schema.forEach((s) => buildCell(s, row, inputs, cells, values));
+    hiddenCols.forEach((k) => { if (cells[k]) cells[k].classList.add('hidden'); });
     const del = el('button', { type: 'button', class: 'row-del', title: 'Remove' }, '×');
     del.addEventListener('click', () => removeRow(rowApi));
     row.appendChild(del);
     layers.appendChild(row);
-    const rowApi = { row, inputs, deletable: !opts.undeletable, errors: new Set() };
+    const rowApi = { row, cells, inputs, deletable: !opts.undeletable, errors: new Set() };
     if (!rowApi.deletable) del.style.visibility = 'hidden';
     rows.push(rowApi);
     syncHeaderVisibility();
     return rowApi;
   }
 
-  function buildCell(s, row, inputs, values) {
+  function buildCell(s, row, inputs, cells, values) {
     let inp, cellNode = null;
     if (s.type === 'option') {
       inp = el('select', { class: 'centered-input' });
       const opts = typeof s.options === 'function' ? s.options() : s.options;
-      if (s.allowEmpty) inp.appendChild(el('option', { value: '' }, s.placeholder ?? '— select —'));
+      if (s.allowEmpty) inp.appendChild(el('option', { value: '' }, s.placeholder ?? 'select'));
       opts.forEach((o) => {
         const val = typeof o === 'string' ? o : o.value;
         const txt = typeof o === 'string' ? o : o.label;
@@ -661,8 +681,19 @@ export function layeredField(opts) {
     inputs[s.key] = inp;
     // Wrap each control with its column label so layers can stack on mobile.
     // `.layer-cell { display: contents }` keeps the desktop grid identical.
-    row.appendChild(el('div', { class: 'layer-cell', 'data-label': s.label }, cellNode || inp));
+    const cell = el('div', { class: 'layer-cell', 'data-label': s.label }, cellNode || inp);
+    cells[s.key] = cell;
+    row.appendChild(cell);
   }
+
+  // Show/hide a whole column (header + the cell in every row) and reflow the grid.
+  wrapper.setColumnHidden = (key, hidden) => {
+    if (hidden === hiddenCols.has(key)) return;   // cheap no-op: this runs on every change
+    if (hidden) hiddenCols.add(key); else hiddenCols.delete(key);
+    if (ths[key]) ths[key].classList.toggle('hidden', hidden);
+    rows.forEach((r) => { if (r.cells[key]) r.cells[key].classList.toggle('hidden', hidden); });
+    applyColumnLayout();
+  };
 
   function removeRow(rowApi) {
     if (!rowApi.deletable) return;
@@ -864,7 +895,7 @@ export function layeredField(opts) {
           const inp = inputs[s.key];
           const prev = inp.value;
           inp.innerHTML = '';
-          if (s.allowEmpty) inp.appendChild(el('option', { value: '' }, s.placeholder ?? '— select —'));
+          if (s.allowEmpty) inp.appendChild(el('option', { value: '' }, s.placeholder ?? 'select'));
           s.options().forEach((o) => {
             const val = typeof o === 'string' ? o : o.value;
             const txt = typeof o === 'string' ? o : o.label;
