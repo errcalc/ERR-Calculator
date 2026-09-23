@@ -1188,8 +1188,14 @@ table.schedule th {
    for genuine file-drop zones (.upload-zone), where the convention actually means something. */
 .layer-panel { border: none; background: none; padding: 0; margin-bottom: 22px; }
 
-.sec-table { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
-.sec-empty { padding: 10px 2px; }
+/* The layer tables (Interest Rate, Lending Rate, Loan Security) sit in the same filled, bordered
+   area as every other input box, so they read as a field to fill even while still empty. */
+.sec-table {
+  display: flex; flex-direction: column; gap: 8px; margin-top: 6px;
+  padding: 8px 10px; background: var(--bg);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.sec-empty { padding: 2px 0; }
 /* Row = bordered value box (centered) + Edit/Delete OUTSIDE the box. */
 .sec-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
 .sec-vals {
