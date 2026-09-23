@@ -1,6 +1,6 @@
 // Per-module user guide — opened from the info button in the header. Plain, simple language
 // (explained as if to a 10-year-old). Sections are collapsed by default; click to expand.
-import { el, openModal, closeModal } from './components.js?v=20260923a';
+import { el, openModal, closeModal } from './components.js?v=20260923e';
 
 // ---- Shared sections reused across modules ----
 const MODALITY_BULLETS = [
@@ -58,11 +58,12 @@ const IDP_SECTION = {
 };
 const RATE_LAYERS_SECTION = {
   h: 'Interest Rate Layers',
-  p: 'Only there when you said in step 1 that the interest rate changes. It takes the place of the Offered Rate box: one row per stretch of the loan, each with its own rate.',
+  p: 'Only there when you said in step 1 that the interest rate changes. It takes the place of the Offered Rate box: one row per stretch of the loan, each with its own rate. The form only shows the saved layers — click “Edit” beside the heading to add or change them in a pop-up, then “Save” and confirm.',
   bullets: [
-    'Rows are counted in the loan’s own months. The first row always starts at Month 01, and each next row starts the month after the one before it ends — you only pick where each row ends (To Month).',
+    'Enter the Loan Tenor first — the layers are counted in its months.',
+    'Rows are counted in the loan’s own months. The first row always starts at Month 01, and each next row starts the month after the one before it ends — you only pick where each row ends (To Month). “+ Add another layer” works once the last row ends before the final month.',
     'The rate can change inside the moratorium too, because the months are the whole loan’s months, not the months after the rest period.',
-    'The last row must end at the loan’s final month. A row cannot end before it starts, and only the last row may reach the final month.',
+    'The last row must end at the loan’s final month. If you change the tenor afterwards, the results ask you to open Edit again — the last row then fits itself to the new final month.',
     'Rate Type — Commercial Rate: you type the rate. Refinance Rate: the rate is fixed at 5.00% and its box locks. Switch back to Commercial and whatever you had typed returns.',
     'In Refinance months the bank’s cost of fund is 1% flat instead of the Total Cost of Fund you typed. Commercial months keep the Total Cost of Fund. The Loan Security Benefit always uses the Total Cost of Fund.',
     'EMI and EQI are worked out again from the first payment that feels a new rate, so the loan still finishes at exactly zero. If a rate changes in the middle of a quarter, that quarter’s interest is split month by month.',
@@ -102,8 +103,8 @@ const MANUALS = {
         h: 'Which module do I want?',
         p: 'Two choices, and the difference is simply whether the loan already exists:',
         bullets: [
-          'Loan Facilities — you are pricing a NEW facility and want to know what it would earn.',
-          'Rate Revision — the facility is already running and its interest rate has changed since it was given out.',
+          'ERR - New Loan Facility — you are pricing a NEW facility and want to know what it would earn.',
+          'ERR - Rate Revision — the facility is already running and its interest rate has changed since it was given out.',
         ],
       },
       FLOW_SECTION,
@@ -112,7 +113,7 @@ const MANUALS = {
 
   // Step 1 of Loan Facilities: only the questions actually on screen.
   questionsLoan: {
-    title: 'Loan Facilities — the questions',
+    title: 'ERR - New Loan Facility — the questions',
     intro: 'A few short questions about the deal. They decide which boxes the next screen shows you, so you are never given fields that have nothing to do with your loan.',
     sections: [
       MORATORIUM_Q,
@@ -143,13 +144,13 @@ const MANUALS = {
 
   // Step 1 of Rate Revision: no layers question here.
   questionsRevision: {
-    title: 'Rate Revision — the questions',
+    title: 'ERR - Rate Revision — the questions',
     intro: 'Two short questions about the facility as it was originally given out. The rate changes themselves are listed on the next screen.',
     sections: [
       MORATORIUM_Q,
       {
         h: 'Payment Modality',
-        p: 'How the borrower repays. Unlike Loan Facilities there is no layers question here, so this is always asked. The choices are:',
+        p: 'How the borrower repays. Unlike ERR - New Loan Facility there is no layers question here, so this is always asked. The choices are:',
         bullets: MODALITY_BULLETS,
       },
       NEXT_STEP_Q,
@@ -158,7 +159,7 @@ const MANUALS = {
 
   // The fork shown before Rate Revision's questions.
   revisionChoice: {
-    title: 'Rate Revision',
+    title: 'ERR - Rate Revision',
     intro: 'First, how do you want to give the system the loan? Pick whichever matches what you already have to hand.',
     sections: [
       {
@@ -176,7 +177,7 @@ const MANUALS = {
   },
 
   regular: {
-    title: 'Loan Facilities — one payment style',
+    title: 'ERR - New Loan Facility — one payment style',
     intro: 'You said the loan is paid back the same way from start to finish. Fill the boxes from the top down; the schedule and the return build themselves on the right as you go.',
     sections: [
       { h: 'Loan Amount', p: 'The total money the bank hands over to the borrower. Type the whole amount, for example 100,000,000.' },
@@ -233,7 +234,7 @@ const MANUALS = {
   },
 
   customized: {
-    title: 'Loan Facilities — payment layers',
+    title: 'ERR - New Loan Facility — payment layers',
     intro: 'You said the payment style changes during the loan, so instead of one modality you build “Payment Layers” — one row per stretch of the loan, each with its own style.',
     sections: [
       { h: 'Loan Amount', p: 'The total money the bank hands over to the borrower. Type the whole amount, for example 100,000,000.' },
@@ -271,7 +272,7 @@ const MANUALS = {
   },
 
   revisionStructured: {
-    title: 'Rate Revision — from the loan details',
+    title: 'ERR - Rate Revision — from the loan details',
     intro: 'You chose to give the original terms rather than upload a finished schedule. List each rate and the day it started, add any security, and upload the bank’s monthly cost-of-fund file — the system rebuilds the whole schedule and finds the ERR.',
     sections: [
       { h: 'Initial Loan Amount', p: 'The starting loan money, for example 100,000,000.' },
@@ -303,7 +304,7 @@ const MANUALS = {
   },
 
   revisionCustomized: {
-    title: 'Rate Revision — from an uploaded schedule',
+    title: 'ERR - Rate Revision — from an uploaded schedule',
     intro: 'You already have the full payment schedule in a file, with the rate changes worked out. Upload it, add security and cost-of-fund data, and the system finds the ERR. None of the step-1 questions apply here, which is why you were not asked them.',
     sections: [
       {

@@ -1,25 +1,25 @@
 // Page builders for the four calculation flows
 import {
   el, numberField, percentField, optionField, dateField, textField,
-  monthBoxesField, layeredField, securityLayersField, rateLayersField, toast, parseDDMMMYYYY, formatDDMMMYYYY,
+  monthBoxesField, layeredField, securityLayersField, rateLayersField, monthRateLayersField, toast, parseDDMMMYYYY, formatDDMMMYYYY,
   openModal, closeModal,
-} from './components.js?v=20260923a';
-import { isoToDDMMMYYYY } from './formatting.js?v=20260923a';
+} from './components.js?v=20260923e';
+import { isoToDDMMMYYYY } from './formatting.js?v=20260923e';
 import {
   buildStructuredSchedule, buildCustomizedSchedule,
   buildRateRevisionStructured, computeMetrics,
   buildSplitSchedule, principalPaymentMonths, SPLIT_MODE, FREQ, FREQ_NAMES,
   computeRevisionMetrics, computeRevisionCustomizedMetrics, buildCofData,
   addMonthsDue, COMMERCIAL_RATE, REFINANCE_RATE, REFINANCE_LENDING_RATE,
-} from './calculations.js?v=20260923a';
-import { formatMoney, formatPercent, formatNumber, formatRateLayers } from './formatting.js?v=20260923a';
-import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20260923a';
+} from './calculations.js?v=20260923e';
+import { formatMoney, formatPercent, formatNumber, formatRateLayers } from './formatting.js?v=20260923e';
+import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20260923e';
 import {
   downloadScheduleAsExcel, downloadSampleAmortization, readUploadedSchedule,
   downloadScheduleAsWord, downloadScheduleAsPDF, downloadVerificationExcel, downloadReportPDF,
   downloadCofSample, readUploadedCof,
   downloadCustomizedRevisionSample, readCustomizedRevisionFile,
-} from './excel.js?v=20260923a';
+} from './excel.js?v=20260923e';
 
 // Cached page state by tab key (also persisted via storage saveDraft)
 const tabState = {};
@@ -70,85 +70,28 @@ function labelSecurityFields(type, hasMoratorium, csAmount, csRate) {
 }
 
 // ---- Interest Rate Layers (both Loan Facilities forms, when step 1 said the rate changes) ----
-// One row per stretch of the loan, in months. Row 1 starts at Month 01 and each later row starts
-// the month after the previous one ends; the RM picks every To, and the last layer must end at
-// the loan's final month. A Refinance row lends at the scheme's fixed rate, so its rate box fills
-// itself and locks — and switching back to Commercial gives back whatever was typed before.
+// A read-only table with one Edit popup, like Rate Revision's Lending Rate Layers. The popup
+// enforces the layer rules on Save; a Refinance layer's rate is the scheme's fixed rate.
 function interestRateLayersField(getTenor) {
-  const monthOpts = () => Array.from({ length: getTenor() || 0 },
-    (_, i) => ({ value: String(i + 1), label: String(i + 1).padStart(2, '0') }));
-  const field = layeredField({
-    label: 'Interest Rate Layers', name: 'intRateLayers',
-    schema: [
-      { key: 'fromMonth', label: 'From Month', type: 'option', options: monthOpts, allowEmpty: true, placeholder: '', width: '0.8fr', readOnly: true },
-      { key: 'toMonth', label: 'To Month', type: 'option', options: monthOpts, allowEmpty: true, placeholder: 'select', width: '0.8fr' },
-      { key: 'rateType', label: 'Rate Type', type: 'option', options: [COMMERCIAL_RATE, REFINANCE_RATE], width: '1.3fr' },
-      { key: 'rate', label: 'Interest Rate', type: 'percent', width: '1fr' },
-    ],
-    addLabel: '+ Add Rate Layer',
-    minRows: 2, initialRows: 2,
-    cascadingFromKey: 'fromMonth', cascadingToKey: 'toMonth',
-    getMaturity: () => { const t = getTenor(); return { value: t ? String(t) : null, kind: 'month' }; },
-    getAnchor: () => ({ value: '1', kind: 'month' }),
-    allowFromEqualTo: true,
-    onChange: () => lockRefinanceRates(),
+  return monthRateLayersField({
+    label: 'Interest Rate Layers', name: 'intRateLayers', getTenor,
+    rateTypes: [COMMERCIAL_RATE, REFINANCE_RATE],
+    fixedRates: { [REFINANCE_RATE]: REFINANCE_LENDING_RATE },
   });
-  field.onCannotAdd = (msg) => toast(msg, 'error');
-  function lockRefinanceRates() {
-    field.rows.forEach(({ inputs }) => {
-      const inp = inputs.rate;
-      const refi = inputs.rateType.value === REFINANCE_RATE;
-      if (refi && !inp.disabled) inp.dataset.commercial = inp.value;
-      if (refi) inp.value = (REFINANCE_LENDING_RATE * 100).toFixed(2);
-      else if (inp.disabled) inp.value = inp.dataset.commercial || '';
-      inp.disabled = refi;
-      inp.classList.toggle('readonly-cell', refi);
-      inp.parentElement.classList.toggle('empty', inp.value === '');
-    });
-  }
-  // Tenor changed: re-list the months, and let the last layer follow the new final month.
-  field.onTenorChange = () => { field.refreshOptions(); field.applyLayerRules(); };
-  return field;
 }
 
-function collectRateLayers(field) {
-  return field.getValue().map(r => ({
-    fromMonth: r.fromMonth ? Number(r.fromMonth) : null,
-    toMonth: r.toMonth ? Number(r.toMonth) : null,
-    rateType: r.rateType || COMMERCIAL_RATE,
-    rate: r.rateType === REFINANCE_RATE ? REFINANCE_LENDING_RATE : r.rate,
-  }));
-}
-
-// Draft restore: a Refinance row's rate is the fixed scheme rate, not something the RM typed,
-// so it is not written back into the box (switching the row to Commercial then starts blank).
-function restoreRateLayers(field, saved) {
-  if (!field || !Array.isArray(saved) || !saved.length) return;
-  field.setValue(saved.map(L => ({
-    fromMonth: L.fromMonth != null ? String(L.fromMonth) : '',
-    toMonth: L.toMonth != null ? String(L.toMonth) : '',
-    rateType: L.rateType || COMMERCIAL_RATE,
-    rate: L.rateType === REFINANCE_RATE ? null : L.rate,
-  })));
-}
-
+// Saved layers are already contiguous from Month 01 to the tenor at the moment of Save; what can
+// go stale is the tenor itself (or a draft from an older form), so each points back to Edit.
 function validateRateLayers(layers, tenor) {
   const pad = (m) => String(m).padStart(2, '0');
-  if (!layers.length) return 'Add the Interest Rate Layers.';
-  for (let k = 0; k < layers.length; k++) {
-    const L = layers[k], n = k + 1;
-    // Checked in order, so a row whose From is blank because the row above has no To yet is
-    // reported as that row's missing To.
-    if (!L.toMonth) return `Rate layer ${n}: select a To month.`;
-    if (!L.fromMonth) return `Rate layer ${n}: its From month is missing — re-enter the Loan Tenor.`;
-    if (L.toMonth < L.fromMonth) return `Rate layer ${n}: To cannot be earlier than its From (Month ${pad(L.fromMonth)}).`;
-    if (L.rateType !== REFINANCE_RATE && L.rate === null) return `Rate layer ${n}: enter the Commercial Rate.`;
-    if (k < layers.length - 1 && L.toMonth >= tenor)
-      return `Rate layer ${n} already runs to the loan’s last month (Month ${pad(tenor)}) — end it earlier, or remove the layers after it.`;
-  }
+  if (!layers.length) return 'Add the Interest Rate Layers — click Edit next to them.';
+  const broken = layers.some((L, k) => L.fromMonth !== (k === 0 ? 1 : layers[k - 1].toMonth + 1)
+    || L.toMonth < L.fromMonth || L.rate == null);
+  if (broken) return 'The Interest Rate Layers are incomplete — click Edit next to them to fix them.';
   const last = layers[layers.length - 1];
-  if (last.toMonth !== tenor)
-    return `The last rate layer must end at Month ${pad(tenor)}, the loan’s last month. It ends at Month ${pad(last.toMonth)}.`;
+  if (last.toMonth !== tenor) {
+    return `The Interest Rate Layers run to Month ${pad(last.toMonth)}, but the loan’s final month is Month ${pad(tenor)} — click Edit next to them to update them.`;
+  }
   return null;
 }
 
@@ -250,7 +193,7 @@ export function renderRegularLoan(root, pre = null) {
   // single Offered Rate box.
   const layeredRates = !!(pre && pre.rateLayers === 'Yes');
   const intRateLayers = layeredRates ? interestRateLayersField(() => loanTenor.getValue()) : null;
-  loanTenor.input.addEventListener('input', () => { if (intRateLayers) intRateLayers.onTenorChange(); refresh(); });
+  loanTenor.input.addEventListener('input', () => refresh());
   const paymentMode = optionField({
     label: 'Payment Mode', name: 'paymentMode',
     options: [{ label: 'select', value: '' }, 'EMI', 'EQI', 'Equal Principal + Interest (Monthly)', 'Equal Principal + Interest (Quarterly)', SPLIT_MODE],
@@ -455,9 +398,6 @@ export function renderRegularLoan(root, pre = null) {
 
   // Restore draft
   restoreDraft('regular', fields);
-  // A restored tenor is set without an input event, so the rate layers' month lists must be
-  // rebuilt here — otherwise Month 01 has no option to land on.
-  if (intRateLayers) intRateLayers.onTenorChange();
   // After the draft, never before: the entry answers are the fresher truth.
   applyEntryAnswers([
     [moratoriumAvail, pre && pre.moratorium],
@@ -512,7 +452,7 @@ function collectRegularInputs(f) {
   return {
     offeredRate: f.offeredRate.getValue(),
     rateLayered: !!f.intRateLayers,
-    intRateLayers: f.intRateLayers ? collectRateLayers(f.intRateLayers) : [],
+    intRateLayers: f.intRateLayers ? f.intRateLayers.getValue() : [],
     loanAmount: f.loanAmount.getValue(),
     moratoriumAvail: f.moratoriumAvail.getValue(),
     moratoriumPeriod: f.moratoriumPeriod.getValue() || 0,
@@ -603,10 +543,7 @@ export function renderCustomizedLoan(root, pre = null) {
   const loanTenor = numberField({ label: 'Loan Tenor (Months)', name: 'loanTenor', integerOnly: true, min: 1 });
   const layeredRates = !!(pre && pre.rateLayers === 'Yes');
   const intRateLayers = layeredRates ? interestRateLayersField(() => loanTenor.getValue()) : null;
-  loanTenor.input.addEventListener('input', () => {
-    if (intRateLayers) intRateLayers.onTenorChange();
-    refreshLayerOpts(); refresh(); paymentLayers.applyLayerRules(); refreshSplitGrid();
-  });
+  loanTenor.input.addEventListener('input', () => { refreshLayerOpts(); refresh(); paymentLayers.applyLayerRules(); refreshSplitGrid(); });
 
   function fromOptions() {
     const tenor = loanTenor.getValue() || 0;
@@ -811,7 +748,6 @@ export function renderCustomizedLoan(root, pre = null) {
   left.appendChild(section);
 
   restoreDraft('customized', fields);
-  if (intRateLayers) intRateLayers.onTenorChange();
   // After the draft, never before: the entry answers are the fresher truth.
   applyEntryAnswers([
     [moratoriumAvail, pre && pre.moratorium],
@@ -859,7 +795,7 @@ function collectCustomizedInputs(f) {
   return {
     offeredRate: f.offeredRate.getValue(),
     rateLayered: !!f.intRateLayers,
-    intRateLayers: f.intRateLayers ? collectRateLayers(f.intRateLayers) : [],
+    intRateLayers: f.intRateLayers ? f.intRateLayers.getValue() : [],
     loanAmount: f.loanAmount.getValue(),
     moratoriumAvail: f.moratoriumAvail.getValue(),
     moratoriumPeriod: f.moratoriumPeriod.getValue() || 0,
@@ -1697,8 +1633,7 @@ function restoreDraft(tabKey, fields) {
         customPrincipal: L.customPrincipal,
       })));
     }
-    // Loan Facilities interest-rate layers (after the tenor, which sets their month lists).
-    if (fields.intRateLayers) restoreRateLayers(fields.intRateLayers, data.intRateLayers);
+    if (fields.intRateLayers && Array.isArray(data.intRateLayers)) fields.intRateLayers.setValue(data.intRateLayers);
     if (fields.rateLayers && Array.isArray(data.rateLayers) && data.rateLayers.length) {
       fields.rateLayers.setValue(data.rateLayers.map(L => ({
         fromDate: isoToDDMMMYYYY(L.fromDate),

@@ -1,5 +1,5 @@
 // Reusable UI component builders (returns DOM nodes)
-import { attachCommaFormatter, sanitizeDecimalString, formatTwoDecimalsOnBlur } from './formatting.js?v=20260923a';
+import { attachCommaFormatter, sanitizeDecimalString, formatTwoDecimalsOnBlur } from './formatting.js?v=20260923e';
 
 let uid = 0;
 const nextId = () => `f${++uid}`;
@@ -1192,6 +1192,198 @@ export function rateLayersField({ label, name, getAnchor = null, getMaturity = n
     render();
   };
   wrapper.applyLayerRules = () => render();
+  render();
+  return wrapper;
+}
+
+// ── Interest Rate layers (Loan Facilities) ──────────────────────────────────────
+// Same pattern as the Lending Rate layers above: a read-only table on the form, and one "Edit"
+// popup holding every layer; Save rewrites the table after a re-confirmation. Layers are counted
+// in the loan's own months — the first starts at Month 01, each later one the month after the
+// previous one ends (both derived, never typed), and the last must end at the loan's final month.
+// A rate type listed in `fixedRates` forces its rate and locks the box; switching the layer back
+// restores whatever had been typed. getValue() returns [{ fromMonth, toMonth, rateType, rate }].
+export function monthRateLayersField({ label, name, getTenor, rateTypes, fixedRates = {}, minLayers = 2 }) {
+  let data = [];
+  const pad = (m) => (m ? String(m).padStart(2, '0') : '—');
+  const rateOf = (type, typed) => (fixedRates[type] != null ? fixedRates[type] : typed);
+  const closeEditor = () => {
+    closeModal();
+    const mc = document.getElementById('modal-card');
+    if (mc) mc.classList.remove('modal-card--sec', 'modal-card--irl');
+  };
+
+  const wrapper = el('div', { class: 'field' });
+  // Popup commits happen outside the form section, so bubble a 'change' from the (in-section)
+  // wrapper to wake the live recalculation and the draft autosave.
+  const notifyChange = () => wrapper.dispatchEvent(new Event('change', { bubbles: true }));
+  const headRow = el('div', { class: 'rl-head' });
+  headRow.appendChild(el('label', {}, label));
+  const editBtn = el('button', { type: 'button', class: 'sec-btn rl-edit-btn' }, 'Edit');
+  editBtn.addEventListener('click', openEditor);
+  headRow.appendChild(editBtn);
+  wrapper.appendChild(headRow);
+  const tableWrap = el('div', { class: 'sec-table rl-table', 'data-name': name });
+  wrapper.appendChild(tableWrap);
+
+  function render() {
+    tableWrap.innerHTML = '';
+    if (!data.length) {
+      tableWrap.appendChild(el('div', { class: 'sec-empty help' }, 'No interest rate layers added yet — click Edit to add.'));
+      return;
+    }
+    tableWrap.appendChild(el('div', { class: 'sec-row rl-row sec-head' },
+      el('div', { class: 'sec-vals irl-vals' },
+        el('div', {}, 'From Month'), el('div', {}, 'To Month'), el('div', {}, 'Rate Type'), el('div', {}, 'Interest Rate'))));
+    data.forEach((r) => {
+      tableWrap.appendChild(el('div', { class: 'sec-row rl-row' },
+        el('div', { class: 'sec-vals irl-vals' },
+          el('div', {}, pad(r.fromMonth)),
+          el('div', {}, pad(r.toMonth)),
+          el('div', {}, r.rateType),
+          el('div', {}, (Number(r.rate) * 100).toFixed(2) + '%'))));
+    });
+  }
+
+  function openEditor() {
+    const tenor = getTenor() || 0;
+    if (!tenor) { toast('Enter the Loan Tenor first — the layers are counted in its months.', 'warn'); return; }
+    const entriesWrap = el('div', { class: 'sec-entries irl-entries' });
+    const rows = [];
+    // Each control sits in a .field so it takes the app's input styling; the label is hidden on a
+    // wide popup (the header row names the columns) and shown when the layers stack on a phone.
+    const cell = (text, node) => el('div', { class: 'field' }, el('label', {}, text), node);
+
+    // From is derived — Month 01 for the first layer, the month after the previous To for the
+    // rest — and each To lists only the months its layer can end on. The last layer's To falls
+    // to the loan's final month until one is chosen.
+    function relink() {
+      rows.forEach((r, i) => {
+        const prevTo = i === 0 ? 0 : Number(rows[i - 1].to.value) || null;
+        r.from = i === 0 ? 1 : (prevTo ? prevTo + 1 : null);
+        r.fromBox.value = r.from && r.from <= tenor ? pad(r.from) : '';
+        const keep = r.to.value;
+        r.to.innerHTML = '';
+        r.to.appendChild(el('option', { value: '' }, 'select'));
+        if (r.from && r.from <= tenor) {
+          for (let m = r.from; m <= tenor; m++) r.to.appendChild(el('option', { value: String(m) }, pad(m)));
+        }
+        if ([...r.to.options].some(o => o.value === keep)) r.to.value = keep;
+        else r.to.value = '';
+        if (i === rows.length - 1 && !r.to.value && r.from && r.from <= tenor) r.to.value = String(tenor);
+      });
+    }
+    function applyType(r) {
+      const fixed = fixedRates[r.type.value];
+      const inp = r.rate.input;
+      if (fixed != null) {
+        if (!inp.readOnly) r.typed = r.rate.getValue();
+        r.rate.setValue(fixed);
+        inp.readOnly = true;
+        inp.classList.add('readonly-cell');
+      } else if (inp.readOnly) {
+        inp.readOnly = false;
+        inp.classList.remove('readonly-cell');
+        r.rate.setValue(r.typed);
+      }
+    }
+    function addRow(values = {}) {
+      const fromBox = el('input', { type: 'text', class: 'centered-input readonly-cell', readonly: 'readonly', tabindex: '-1' });
+      const to = el('select', { class: 'centered-input' });
+      if (values.toMonth) to.appendChild(el('option', { value: String(values.toMonth) }, pad(values.toMonth)));
+      to.value = values.toMonth ? String(values.toMonth) : '';
+      const type = el('select', { class: 'centered-input' }, ...rateTypes.map(t => el('option', { value: t }, t)));
+      type.value = values.rateType && rateTypes.includes(values.rateType) ? values.rateType : rateTypes[0];
+      const rate = percentField({ label: 'Interest Rate', name: 'irlRate' });
+      const rm = el('button', { type: 'button', class: 'row-del', title: 'Remove this layer' }, '×');
+      const rowEl = el('div', { class: 'sec-entry irl-entry' },
+        cell('From Month', fromBox), cell('To Month', to), cell('Rate Type', type), rate, rm);
+      const api = { fromBox, to, type, rate, rowEl, from: null, typed: null };
+      if (fixedRates[type.value] == null && values.rate != null) rate.setValue(values.rate);
+      applyType(api);
+      to.addEventListener('change', relink);
+      type.addEventListener('change', () => applyType(api));
+      rm.addEventListener('click', () => {
+        if (rows.length <= minLayers) { toast(`Keep at least ${minLayers} layers, or use Cancel.`, 'warn'); return; }
+        const k = rows.indexOf(api);
+        if (k >= 0) { rows.splice(k, 1); rowEl.remove(); relink(); }
+      });
+      rows.push(api);
+      entriesWrap.appendChild(rowEl);
+    }
+    (data.length ? data : Array.from({ length: minLayers }, () => ({}))).forEach((r) => addRow(r));
+    relink();
+    // Saved layers always end at the final month, so a mismatch here means the tenor changed
+    // since: let the last layer follow it (a shrink past a layer's start is left for the RM).
+    const lastRow = rows[rows.length - 1];
+    if (lastRow.from && lastRow.from <= tenor) lastRow.to.value = String(tenor);
+
+    const addEntry = el('button', { type: 'button', class: 'sec-add-btn sec-add-entry' }, '+ Add another layer');
+    addEntry.addEventListener('click', () => {
+      const last = rows[rows.length - 1];
+      const lastTo = Number(last.to.value) || 0;
+      if (!lastTo) return toast('Choose the last layer’s To Month first.', 'warn');
+      if (lastTo >= tenor) {
+        return toast(`The last layer already ends at Month ${pad(tenor)}, the loan’s final month — give it an earlier To Month first.`, 'warn');
+      }
+      addRow({});
+      relink();
+    });
+    const cancelBtn = el('button', { type: 'button', class: 'ghost-btn modal-ghost' }, 'Cancel');
+    const saveBtn = el('button', { type: 'button', class: 'primary-btn' }, 'Save');
+
+    cancelBtn.addEventListener('click', () => confirmOverlay('Discard your changes and close this window?',
+      { yesLabel: 'Yes, discard', danger: true, onYes: closeEditor }));
+    saveBtn.addEventListener('click', () => {
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i], n = i + 1;
+        if (!r.from || r.from > tenor) return toast(`Layer ${n} has no months left — remove it, or end layer ${i} earlier.`, 'error');
+        if (!r.to.value) return toast(`Layer ${n}: choose its To Month.`, 'error');
+        if (fixedRates[r.type.value] == null && r.rate.getValue() == null) return toast(`Layer ${n}: enter the interest rate.`, 'error');
+      }
+      if (rows.length < minLayers) return toast(`Add at least ${minLayers} layers.`, 'error');
+      if (Number(rows[rows.length - 1].to.value) !== tenor) {
+        return toast(`The last layer must end at Month ${pad(tenor)}, the loan’s final month.`, 'error');
+      }
+      confirmOverlay('Save these interest rate layers?', { yesLabel: 'Yes, save', onYes: () => {
+        data = rows.map((r) => ({
+          fromMonth: r.from,
+          toMonth: Number(r.to.value),
+          rateType: r.type.value,
+          rate: rateOf(r.type.value, r.rate.getValue()),
+        }));
+        closeEditor(); render(); notifyChange();
+      } });
+    });
+
+    const fixedNote = Object.entries(fixedRates)
+      .map(([t, v]) => `${t} is fixed at ${(v * 100).toFixed(2)}%.`).join(' ');
+    const card = el('div', { class: 'sec-edit rl-editor' },
+      el('div', { class: 'sec-edit-head' }, el('h3', {}, label)),
+      el('p', { class: 'help' },
+        `The first layer starts at Month 01 and each next one starts the month after the previous one ends — pick where each layer ends. The last must end at Month ${pad(tenor)}. ${fixedNote}`),
+      el('div', { class: 'sec-entry irl-entry sec-entry-head irl-head' },
+        el('div', {}, 'From Month'), el('div', {}, 'To Month'), el('div', {}, 'Rate Type'), el('div', {}, 'Interest Rate'), el('div', {}, '')),
+      entriesWrap, addEntry,
+      el('div', { class: 'sec-edit-actions' }, cancelBtn, saveBtn));
+    openModal(card);
+    const back = document.querySelector('#modal-root .modal-backdrop'); if (back) back.onclick = null; // force Save/Cancel
+    const mc = document.getElementById('modal-card'); if (mc) mc.classList.add('modal-card--sec', 'modal-card--irl');
+  }
+
+  wrapper.getValue = () => data.map((r) => ({ ...r }));
+  // Drafts may hold layers from before a tenor change; they are kept as saved and flagged by the
+  // page's validation, and opening Edit re-fits the last layer to the new final month.
+  wrapper.setValue = (arr) => {
+    data = (arr || [])
+      .filter((r) => r && r.fromMonth && r.toMonth && rateTypes.includes(r.rateType)
+        && rateOf(r.rateType, r.rate) != null)
+      .map((r) => ({
+        fromMonth: Number(r.fromMonth), toMonth: Number(r.toMonth),
+        rateType: r.rateType, rate: Number(rateOf(r.rateType, r.rate)),
+      }));
+    render();
+  };
   render();
   return wrapper;
 }

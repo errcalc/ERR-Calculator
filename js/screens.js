@@ -6,7 +6,7 @@
 // that with two modules and a handful of questions the RM can actually answer; the answers
 // decide which form they land on, and are carried into it so nothing is asked twice.
 // ============================================================
-import { el, optionField } from './components.js?v=20260923a';
+import { el, optionField } from './components.js?v=20260923e';
 
 export const MODALITIES = [
   'EMI', 'EQI',
@@ -34,10 +34,10 @@ export function renderLanding(root, go) {
   root.innerHTML = '';
   root.appendChild(el('div', { class: 'screen' },
     el('div', { class: 'choice-grid' },
-      choiceCard('Loan Facilities',
+      choiceCard('ERR - New Loan Facility',
         'Price a new facility and see what it actually earns.',
         () => go({ screen: 'questions', module: 'loan' })),
-      choiceCard('Rate Revision',
+      choiceCard('ERR - Rate Revision',
         'Re-price a facility that is already running.',
         () => go({ screen: 'revisionChoice', module: 'revision' })),
     )));
@@ -50,7 +50,7 @@ export function renderRevisionChoice(root, go) {
   root.innerHTML = '';
   root.appendChild(el('div', { class: 'screen' },
     backLink(() => go({ screen: 'landing' })),
-    el('h1', { class: 'screen-title' }, 'Rate Revision'),
+    el('h1', { class: 'screen-title' }, 'ERR - Rate Revision'),
     el('div', { class: 'choice-grid' },
       choiceCard('Enter the loan details',
         'Rebuild the schedule from the facility’s original terms.',
@@ -110,7 +110,7 @@ export function renderQuestions(root, ctx, go) {
 
   root.appendChild(el('div', { class: 'screen' },
     backLink(() => go({ screen: isLoan ? 'landing' : 'revisionChoice', module: ctx.module })),
-    el('h1', { class: 'screen-title' }, isLoan ? 'Loan Facilities' : 'Rate Revision'),
+    el('h1', { class: 'screen-title' }, isLoan ? 'ERR - New Loan Facility' : 'ERR - Rate Revision'),
     card));
 
   // How many months is asked on the form itself; here we only need to know whether there
