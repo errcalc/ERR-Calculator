@@ -25,6 +25,15 @@ export function formatPercent(value, { decimals = 4 } = {}) {
   }) + '%';
 }
 
+// Interest Rate Layers in one line — "12.00% Commercial (Months 01–09); 5.00% Refinance (Months
+// 10–24)". Shared by the schedule downloads, the report and the verification workbook.
+export function formatRateLayers(layers) {
+  const pad = (m) => String(m).padStart(2, '0');
+  return (layers || []).map(L =>
+    `${formatPercent(L.rate, { decimals: 2 })} ${String(L.rateType || '').replace(/ Rate$/, '')} (Months ${pad(L.fromMonth)}–${pad(L.toMonth)})`,
+  ).join('; ');
+}
+
 // strip commas, return raw number string
 export function unformat(str) {
   if (str === null || str === undefined) return '';

@@ -3,23 +3,23 @@ import {
   el, numberField, percentField, optionField, dateField, textField,
   monthBoxesField, layeredField, securityLayersField, rateLayersField, toast, parseDDMMMYYYY, formatDDMMMYYYY,
   openModal, closeModal,
-} from './components.js?v=20260916a';
-import { isoToDDMMMYYYY } from './formatting.js?v=20260916a';
+} from './components.js?v=20260923a';
+import { isoToDDMMMYYYY } from './formatting.js?v=20260923a';
 import {
   buildStructuredSchedule, buildCustomizedSchedule,
   buildRateRevisionStructured, computeMetrics,
   buildSplitSchedule, principalPaymentMonths, SPLIT_MODE, FREQ, FREQ_NAMES,
   computeRevisionMetrics, computeRevisionCustomizedMetrics, buildCofData,
-  addMonthsDue,
-} from './calculations.js?v=20260916a';
-import { formatMoney, formatPercent, formatNumber } from './formatting.js?v=20260916a';
-import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20260916a';
+  addMonthsDue, COMMERCIAL_RATE, REFINANCE_RATE, REFINANCE_LENDING_RATE,
+} from './calculations.js?v=20260923a';
+import { formatMoney, formatPercent, formatNumber, formatRateLayers } from './formatting.js?v=20260923a';
+import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20260923a';
 import {
   downloadScheduleAsExcel, downloadSampleAmortization, readUploadedSchedule,
   downloadScheduleAsWord, downloadScheduleAsPDF, downloadVerificationExcel, downloadReportPDF,
   downloadCofSample, readUploadedCof,
   downloadCustomizedRevisionSample, readCustomizedRevisionFile,
-} from './excel.js?v=20260916a';
+} from './excel.js?v=20260923a';
 
 // Cached page state by tab key (also persisted via storage saveDraft)
 const tabState = {};
@@ -67,6 +67,95 @@ function labelSecurityFields(type, hasMoratorium, csAmount, csRate) {
   const name = securityDisplayName(type, hasMoratorium);
   if (csAmount) csAmount.setLabel(`${name} Amount`);
   if (csRate) csRate.setLabel(`${name} Rate`);
+}
+
+// ---- Interest Rate Layers (both Loan Facilities forms, when step 1 said the rate changes) ----
+// One row per stretch of the loan, in months. Row 1 starts at Month 01 and each later row starts
+// the month after the previous one ends; the RM picks every To, and the last layer must end at
+// the loan's final month. A Refinance row lends at the scheme's fixed rate, so its rate box fills
+// itself and locks — and switching back to Commercial gives back whatever was typed before.
+function interestRateLayersField(getTenor) {
+  const monthOpts = () => Array.from({ length: getTenor() || 0 },
+    (_, i) => ({ value: String(i + 1), label: String(i + 1).padStart(2, '0') }));
+  const field = layeredField({
+    label: 'Interest Rate Layers', name: 'intRateLayers',
+    schema: [
+      { key: 'fromMonth', label: 'From Month', type: 'option', options: monthOpts, allowEmpty: true, placeholder: '', width: '0.8fr', readOnly: true },
+      { key: 'toMonth', label: 'To Month', type: 'option', options: monthOpts, allowEmpty: true, placeholder: 'select', width: '0.8fr' },
+      { key: 'rateType', label: 'Rate Type', type: 'option', options: [COMMERCIAL_RATE, REFINANCE_RATE], width: '1.3fr' },
+      { key: 'rate', label: 'Interest Rate', type: 'percent', width: '1fr' },
+    ],
+    addLabel: '+ Add Rate Layer',
+    minRows: 2, initialRows: 2,
+    cascadingFromKey: 'fromMonth', cascadingToKey: 'toMonth',
+    getMaturity: () => { const t = getTenor(); return { value: t ? String(t) : null, kind: 'month' }; },
+    getAnchor: () => ({ value: '1', kind: 'month' }),
+    allowFromEqualTo: true,
+    onChange: () => lockRefinanceRates(),
+  });
+  field.onCannotAdd = (msg) => toast(msg, 'error');
+  function lockRefinanceRates() {
+    field.rows.forEach(({ inputs }) => {
+      const inp = inputs.rate;
+      const refi = inputs.rateType.value === REFINANCE_RATE;
+      if (refi && !inp.disabled) inp.dataset.commercial = inp.value;
+      if (refi) inp.value = (REFINANCE_LENDING_RATE * 100).toFixed(2);
+      else if (inp.disabled) inp.value = inp.dataset.commercial || '';
+      inp.disabled = refi;
+      inp.classList.toggle('readonly-cell', refi);
+      inp.parentElement.classList.toggle('empty', inp.value === '');
+    });
+  }
+  // Tenor changed: re-list the months, and let the last layer follow the new final month.
+  field.onTenorChange = () => { field.refreshOptions(); field.applyLayerRules(); };
+  return field;
+}
+
+function collectRateLayers(field) {
+  return field.getValue().map(r => ({
+    fromMonth: r.fromMonth ? Number(r.fromMonth) : null,
+    toMonth: r.toMonth ? Number(r.toMonth) : null,
+    rateType: r.rateType || COMMERCIAL_RATE,
+    rate: r.rateType === REFINANCE_RATE ? REFINANCE_LENDING_RATE : r.rate,
+  }));
+}
+
+// Draft restore: a Refinance row's rate is the fixed scheme rate, not something the RM typed,
+// so it is not written back into the box (switching the row to Commercial then starts blank).
+function restoreRateLayers(field, saved) {
+  if (!field || !Array.isArray(saved) || !saved.length) return;
+  field.setValue(saved.map(L => ({
+    fromMonth: L.fromMonth != null ? String(L.fromMonth) : '',
+    toMonth: L.toMonth != null ? String(L.toMonth) : '',
+    rateType: L.rateType || COMMERCIAL_RATE,
+    rate: L.rateType === REFINANCE_RATE ? null : L.rate,
+  })));
+}
+
+function validateRateLayers(layers, tenor) {
+  const pad = (m) => String(m).padStart(2, '0');
+  if (!layers.length) return 'Add the Interest Rate Layers.';
+  for (let k = 0; k < layers.length; k++) {
+    const L = layers[k], n = k + 1;
+    // Checked in order, so a row whose From is blank because the row above has no To yet is
+    // reported as that row's missing To.
+    if (!L.toMonth) return `Rate layer ${n}: select a To month.`;
+    if (!L.fromMonth) return `Rate layer ${n}: its From month is missing — re-enter the Loan Tenor.`;
+    if (L.toMonth < L.fromMonth) return `Rate layer ${n}: To cannot be earlier than its From (Month ${pad(L.fromMonth)}).`;
+    if (L.rateType !== REFINANCE_RATE && L.rate === null) return `Rate layer ${n}: enter the Commercial Rate.`;
+    if (k < layers.length - 1 && L.toMonth >= tenor)
+      return `Rate layer ${n} already runs to the loan’s last month (Month ${pad(tenor)}) — end it earlier, or remove the layers after it.`;
+  }
+  const last = layers[layers.length - 1];
+  if (last.toMonth !== tenor)
+    return `The last rate layer must end at Month ${pad(tenor)}, the loan’s last month. It ends at Month ${pad(last.toMonth)}.`;
+  return null;
+}
+
+// Engine shape: months + type + rate. Null when the loan has a single Offered Rate.
+function rateLayerParams(inputs) {
+  if (!inputs.rateLayered) return null;
+  return inputs.intRateLayers.map(L => ({ from: L.fromMonth, to: L.toMonth, type: L.rateType, rate: L.rate }));
 }
 
 function setTwoLineLabel(field, line1, line2) {
@@ -157,7 +246,11 @@ export function renderRegularLoan(root, pre = null) {
   });
 
   const loanTenor = numberField({ label: 'Loan Tenor (Months)', name: 'loanTenor', integerOnly: true, min: 1 });
-  loanTenor.input.addEventListener('input', () => refresh());
+  // Step 1 said the rate changes during the loan: the Interest Rate Layers table replaces the
+  // single Offered Rate box.
+  const layeredRates = !!(pre && pre.rateLayers === 'Yes');
+  const intRateLayers = layeredRates ? interestRateLayersField(() => loanTenor.getValue()) : null;
+  loanTenor.input.addEventListener('input', () => { if (intRateLayers) intRateLayers.onTenorChange(); refresh(); });
   const paymentMode = optionField({
     label: 'Payment Mode', name: 'paymentMode',
     options: [{ label: 'select', value: '' }, 'EMI', 'EQI', 'Equal Principal + Interest (Monthly)', 'Equal Principal + Interest (Quarterly)', SPLIT_MODE],
@@ -280,12 +373,14 @@ export function renderRegularLoan(root, pre = null) {
   const csRate = percentField({ label: 'Security Rate', name: 'csRate' });
   const numInst = numberField({ label: 'Number of Installments', name: 'numInst', integerOnly: true, min: 1 });
 
-  section.appendChild(el('div', { class: 'form-row' }, loanAmount, offeredRate));
+  section.appendChild(el('div', { class: 'form-row' }, loanAmount, ...(layeredRates ? [] : [offeredRate])));
   section.appendChild(el('div', { class: 'form-row' }, moratoriumAvail, moratoriumPeriod));
   const moraSection = el('div', { class: 'form-row full hidden' });
   moraSection.appendChild(el('div', { class: 'sub-card' }, idpField));
   section.appendChild(moraSection);
   section.appendChild(el('div', { class: 'form-row' }, loanTenor, paymentMode));
+  // After the tenor, since the layers are counted in the loan's months.
+  if (intRateLayers) section.appendChild(el('div', { class: 'sub-card' }, intRateLayers));
   // Split interest/principal block — frequencies, principal start + basis, the optional
   // per-date amount boxes, and the whole-tenor interest grid. Hidden for every other mode.
   const splitSection = el('div', { class: 'hidden' },
@@ -346,51 +441,43 @@ export function renderRegularLoan(root, pre = null) {
   }
   refresh();
 
+  const fields = {
+    loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
+    loanTenor, paymentMode, totalCof, fundedSecurityType, csAmount, csRate, numInst,
+    intFreq, prinFreq, prinStart, prinBasis, splitGrid, intRateLayers,
+    getCustom: () => customBoxes.map(b => b.getValue() || 0),
+  };
   section.appendChild(el('div', { class: 'action-bar' },
-    resetButton('regular', () => renderRegularLoan(root), () => collectRegularInputs({
-      loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
-      loanTenor, paymentMode, totalCof, fundedSecurityType, csAmount, csRate, numInst,
-      intFreq, prinFreq, prinStart, prinBasis, splitGrid,
-      getCustom: () => customBoxes.map(b => b.getValue() || 0),
-    }))));
+    // Re-render with the same step-1 answers, so a reset keeps the form the RM asked for.
+    resetButton('regular', () => renderRegularLoan(root, pre), () => collectRegularInputs(fields))));
   const { left, right: resultsPanel } = workbench(root);
   left.appendChild(section);
 
   // Restore draft
-  restoreDraft('regular', {
-    loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
-    loanTenor, paymentMode, totalCof, fundedSecurityType, csAmount, csRate, numInst,
-    intFreq, prinFreq, prinStart, prinBasis, splitGrid,
-    getCustom: () => customBoxes.map(b => b.getValue() || 0),
-  });
+  restoreDraft('regular', fields);
+  // A restored tenor is set without an input event, so the rate layers' month lists must be
+  // rebuilt here — otherwise Month 01 has no option to land on.
+  if (intRateLayers) intRateLayers.onTenorChange();
   // After the draft, never before: the entry answers are the fresher truth.
   applyEntryAnswers([
     [moratoriumAvail, pre && pre.moratorium],
     [paymentMode, pre && pre.modality],
   ]);
   refresh();
-  attachDraftAutosave('regular', section, () => collectRegularInputs({
-    loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
-    loanTenor, paymentMode, totalCof, fundedSecurityType, csAmount, csRate, numInst,
-    intFreq, prinFreq, prinStart, prinBasis, splitGrid,
-    getCustom: () => customBoxes.map(b => b.getValue() || 0),
-  }));
+  attachDraftAutosave('regular', section, () => collectRegularInputs(fields));
 
   function compute() {
-    const inputs = collectRegularInputs({
-      loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
-      loanTenor, paymentMode, totalCof, fundedSecurityType, csAmount, csRate, numInst,
-      intFreq, prinFreq, prinStart, prinBasis, splitGrid,
-      getCustom: () => customBoxes.map(b => b.getValue() || 0),
-    });
+    const inputs = collectRegularInputs(fields);
     const msg = validateRegular(inputs);
     if (msg) return { msg };
     const split = inputs.paymentMode === SPLIT_MODE;
     const moraMonths = (!split && inputs.moratoriumAvail === 'Yes') ? inputs.moratoriumPeriod : 0;
     const isCs = inputs.fundedSecurityType === 'FDR' || inputs.fundedSecurityType === 'Cash Security';
+    const rateLayers = rateLayerParams(inputs);
     const params = {
       loanAmount: inputs.loanAmount,
-      ratePerYear: inputs.offeredRate,
+      ratePerYear: rateLayers ? rateLayers[0].rate : inputs.offeredRate,
+      rateLayers,
       tenorMonths: inputs.loanTenor,
       paymentMode: inputs.paymentMode,
       moratoriumMonths: moraMonths,
@@ -424,6 +511,8 @@ export function renderRegularLoan(root, pre = null) {
 function collectRegularInputs(f) {
   return {
     offeredRate: f.offeredRate.getValue(),
+    rateLayered: !!f.intRateLayers,
+    intRateLayers: f.intRateLayers ? collectRateLayers(f.intRateLayers) : [],
     loanAmount: f.loanAmount.getValue(),
     moratoriumAvail: f.moratoriumAvail.getValue(),
     moratoriumPeriod: f.moratoriumPeriod.getValue() || 0,
@@ -451,8 +540,9 @@ const secName = (i) => securityDisplayName(i.fundedSecurityType, i.moratoriumAva
 
 function validateRegular(i) {
   if (!i.loanAmount) return fail('Enter Loan Amount.');
-  if (i.offeredRate === null) return fail('Enter Offered Rate.');
+  if (!i.rateLayered && i.offeredRate === null) return fail('Enter Offered Rate.');
   if (!i.loanTenor) return fail('Enter Loan Tenor.');
+  if (i.rateLayered) { const m = validateRateLayers(i.intRateLayers, i.loanTenor); if (m) return fail(m); }
   if (!i.paymentMode) return fail('Select a Payment Mode.');
   if (i.paymentMode === SPLIT_MODE) {
     if (FREQ[i.intFreq] > FREQ[i.prinFreq])
@@ -511,7 +601,12 @@ export function renderCustomizedLoan(root, pre = null) {
     getCount: () => moratoriumPeriod.getValue() || 0, selectAll: true, capitalizable: true,
   });
   const loanTenor = numberField({ label: 'Loan Tenor (Months)', name: 'loanTenor', integerOnly: true, min: 1 });
-  loanTenor.input.addEventListener('input', () => { refreshLayerOpts(); refresh(); paymentLayers.applyLayerRules(); refreshSplitGrid(); });
+  const layeredRates = !!(pre && pre.rateLayers === 'Yes');
+  const intRateLayers = layeredRates ? interestRateLayersField(() => loanTenor.getValue()) : null;
+  loanTenor.input.addEventListener('input', () => {
+    if (intRateLayers) intRateLayers.onTenorChange();
+    refreshLayerOpts(); refresh(); paymentLayers.applyLayerRules(); refreshSplitGrid();
+  });
 
   function fromOptions() {
     const tenor = loanTenor.getValue() || 0;
@@ -667,12 +762,13 @@ export function renderCustomizedLoan(root, pre = null) {
   const csRate = percentField({ label: 'Security Rate', name: 'csRate' });
   const numInst = numberField({ label: 'Number of Installments', name: 'numInst', integerOnly: true, min: 1 });
 
-  section.appendChild(el('div', { class: 'form-row' }, loanAmount, offeredRate));
+  section.appendChild(el('div', { class: 'form-row' }, loanAmount, ...(layeredRates ? [] : [offeredRate])));
   section.appendChild(el('div', { class: 'form-row' }, moratoriumAvail, moratoriumPeriod));
   const moraSection = el('div', { class: 'form-row full hidden' });
   moraSection.appendChild(el('div', { class: 'sub-card' }, idpField));
   section.appendChild(moraSection);
   section.appendChild(el('div', { class: 'form-row' }, loanTenor));
+  if (intRateLayers) section.appendChild(el('div', { class: 'sub-card' }, intRateLayers));
   section.appendChild(el('div', { class: 'sub-card' }, paymentLayers));
   section.appendChild(custSplitWrap);
   section.appendChild(el('div', { class: 'form-row' }, totalCof, fundedSecurityType));
@@ -704,45 +800,37 @@ export function renderCustomizedLoan(root, pre = null) {
   }
   refresh();
 
+  const fields = {
+    loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
+    loanTenor, paymentLayers, totalCof, fundedSecurityType, csAmount, csRate, numInst,
+    custSplitGrid, intRateLayers,
+  };
   section.appendChild(el('div', { class: 'action-bar' },
-    resetButton('customized', () => renderCustomizedLoan(root), () => collectCustomizedInputs({
-      loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
-      loanTenor, paymentLayers, totalCof, fundedSecurityType, csAmount, csRate, numInst,
-      custSplitGrid,
-    }))));
+    resetButton('customized', () => renderCustomizedLoan(root, pre), () => collectCustomizedInputs(fields))));
   const { left, right: resultsPanel } = workbench(root);
   left.appendChild(section);
 
-  restoreDraft('customized', {
-    loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
-    loanTenor, paymentLayers, totalCof, fundedSecurityType, csAmount, csRate, numInst,
-    custSplitGrid,
-  });
+  restoreDraft('customized', fields);
+  if (intRateLayers) intRateLayers.onTenorChange();
   // After the draft, never before: the entry answers are the fresher truth.
   applyEntryAnswers([
     [moratoriumAvail, pre && pre.moratorium],
   ]);
   refresh(); refreshLayerOpts();
-  attachDraftAutosave('customized', section, () => collectCustomizedInputs({
-    loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
-    loanTenor, paymentLayers, totalCof, fundedSecurityType, csAmount, csRate, numInst,
-    custSplitGrid,
-  }));
+  attachDraftAutosave('customized', section, () => collectCustomizedInputs(fields));
 
   function compute() {
-    const inputs = collectCustomizedInputs({
-      loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
-      loanTenor, paymentLayers, totalCof, fundedSecurityType, csAmount, csRate, numInst,
-      custSplitGrid,
-    });
+    const inputs = collectCustomizedInputs(fields);
     const err = validateCustomized(inputs);
     if (err) return { msg: err };
 
     const mora = inputs.moratoriumAvail === 'Yes' ? inputs.moratoriumPeriod : 0;
     const isCs = inputs.fundedSecurityType === 'FDR' || inputs.fundedSecurityType === 'Cash Security';
+    const rateLayers = rateLayerParams(inputs);
     const params = {
       loanAmount: inputs.loanAmount,
-      ratePerYear: inputs.offeredRate,
+      ratePerYear: rateLayers ? rateLayers[0].rate : inputs.offeredRate,
+      rateLayers,
       tenorMonths: inputs.loanTenor,
       moratoriumMonths: mora,
       idpFlags: inputs.idpFlags,
@@ -770,6 +858,8 @@ function collectCustomizedInputs(f) {
   const tenor = f.loanTenor.getValue();
   return {
     offeredRate: f.offeredRate.getValue(),
+    rateLayered: !!f.intRateLayers,
+    intRateLayers: f.intRateLayers ? collectRateLayers(f.intRateLayers) : [],
     loanAmount: f.loanAmount.getValue(),
     moratoriumAvail: f.moratoriumAvail.getValue(),
     moratoriumPeriod: f.moratoriumPeriod.getValue() || 0,
@@ -798,9 +888,10 @@ function collectCustomizedInputs(f) {
 }
 
 function validateCustomized(i) {
-  if (i.offeredRate === null) return 'Enter Offered Rate.';
+  if (!i.rateLayered && i.offeredRate === null) return 'Enter Offered Rate.';
   if (!i.loanAmount) return 'Enter Loan Amount.';
   if (!i.loanTenor) return 'Enter Loan Tenor.';
+  if (i.rateLayered) { const m = validateRateLayers(i.intRateLayers, i.loanTenor); if (m) return m; }
   if (i.totalCof === null) return 'Enter Total Cost of Fund.';
   if (!i.fundedSecurityType) return 'Select a Funded Security Type.';
   if (!i.moratoriumAvail) return 'Select whether a moratorium is available.';
@@ -1359,13 +1450,15 @@ function buildScheduleMeta(ctx) {
   const header = {};
   const loanAmt = i.loanAmount != null ? i.loanAmount : i.initialAmount;
   if (loanAmt != null) header['Loan Amount'] = formatMoney(loanAmt);
-  if (i.offeredRate != null) header['Interest Rate'] = formatPercent(i.offeredRate);
+  if (i.rateLayered) header['Interest Rate'] = formatRateLayers(i.intRateLayers);
+  else if (i.offeredRate != null) header['Interest Rate'] = formatPercent(i.offeredRate);
   const tenor = i.loanTenor != null ? i.loanTenor : i.tenorMonths;
   if (tenor != null) header['Tenor (Months)'] = String(tenor);
   if (moraYes && i.moratoriumPeriod) header['Moratorium Period (Months)'] = String(i.moratoriumPeriod);
   const modality = i.paymentMode || i.paymentModality;
   if (modality) header[moraYes ? 'Payment Modality After Moratorium' : 'Payment Modality'] = modality;
-  return { header };
+  // A layered rate gets a per-row Interest Rate column. Never COF: these files go to clients.
+  return { header, showRate: !!i.rateLayered };
 }
 
 // Shared "COF Data Upload" widget (Rate Revision — Structured & Customized).
@@ -1431,6 +1524,9 @@ function renderResults(panel, ctx) {
   grid.appendChild(metric('Effective Rate (ERR)', formatPercent(m.effectiveRate), true));
   grid.appendChild(metric('NIM', formatPercent(m.nim)));
   grid.appendChild(metric('Net Interest Income', formatMoney(m.nii)));
+  // With rate layers some months may run on the 1% Refinance COF, so the COF half of
+  // ERR = COF + NIM is no longer the typed Total COF — show the figure actually used.
+  if (ctx.params && ctx.params.rateLayers) grid.appendChild(metric('Effective COF', formatPercent(m.effectiveCof)));
   // If model derived a security amount (EMI/EQI after Moratorium / Installment), show it for transparency
   const sk = String(ctx.inputs.fundedSecurityType || '');
   if ((sk.startsWith('EMI') || sk.startsWith('EQI') || sk === 'Installment') && m.derivedSecurityAmount > 0) {
@@ -1462,8 +1558,11 @@ function renderResults(panel, ctx) {
   const table = el('table', { class: 'schedule' });
   const hasDate = ctx.schedule.rows[0]?.date !== undefined;
   const hasIDP = ctx.schedule.rows.some(r => (r.idpReceivable || 0) > 0);
+  // Rate-layered Loan Facilities: each month's own lending rate and COF.
+  const hasRates = !!(ctx.params && ctx.params.rateLayers);
   const headers = ['Sl.', ...(hasDate ? ['Date'] : []), 'Installment', 'Interest', 'Principal', 'URPA'];
   if (hasIDP) headers.push('Accrued Interest');
+  if (hasRates) headers.push('Rate', 'COF');
   const thead = el('thead', {}, el('tr', {}, ...headers.map(h => el('th', {}, h))));
   const tbody = el('tbody');
   let totPay = 0, totInt = 0, totPrin = 0;
@@ -1475,12 +1574,14 @@ function renderResults(panel, ctx) {
     if (hasDate) cells.push(r.date || '');
     cells.push(formatMoney(r.installment), formatMoney(r.interest), formatMoney(r.principal), formatMoney(r.urpa));
     if (hasIDP) cells.push(formatMoney(r.idpReceivable || 0));
+    if (hasRates) cells.push(r.sl > 0 ? formatPercent(r.rate) : '', r.sl > 0 ? formatPercent(r.cof) : '');
     tbody.appendChild(el('tr', {}, ...cells.map(c => el('td', {}, c))));
   });
   const totalCells = ['TOTAL'];
   if (hasDate) totalCells.push('');
   totalCells.push(formatMoney(totPay), formatMoney(totInt), formatMoney(totPrin), '');
   if (hasIDP) totalCells.push('');
+  if (hasRates) totalCells.push('', '');
   tbody.appendChild(el('tr', { class: 'totals-row' }, ...totalCells.map(c => el('td', {}, c))));
   table.appendChild(thead);
   table.appendChild(tbody);
@@ -1596,6 +1697,8 @@ function restoreDraft(tabKey, fields) {
         customPrincipal: L.customPrincipal,
       })));
     }
+    // Loan Facilities interest-rate layers (after the tenor, which sets their month lists).
+    if (fields.intRateLayers) restoreRateLayers(fields.intRateLayers, data.intRateLayers);
     if (fields.rateLayers && Array.isArray(data.rateLayers) && data.rateLayers.length) {
       fields.rateLayers.setValue(data.rateLayers.map(L => ({
         fromDate: isoToDDMMMYYYY(L.fromDate),

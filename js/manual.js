@@ -1,6 +1,6 @@
 // Per-module user guide — opened from the info button in the header. Plain, simple language
 // (explained as if to a 10-year-old). Sections are collapsed by default; click to expand.
-import { el, openModal, closeModal } from './components.js?v=20260917l';
+import { el, openModal, closeModal } from './components.js?v=20260923a';
 
 // ---- Shared sections reused across modules ----
 const MODALITY_BULLETS = [
@@ -29,7 +29,7 @@ const FLOW_SECTION = {
   h: 'How this page works',
   p: 'Each module has two steps, so you are never shown boxes that have nothing to do with your deal.',
   bullets: [
-    'Step 1 — a few short questions: is there a moratorium, does the payment style change part-way through the loan, and if it does not, which style is it.',
+    'Step 1 — a few short questions: is there a moratorium, does the interest rate change during the loan, does the payment style change part-way through the loan, and if it does not, which style is it.',
     'Step 2 — the form: everything else. Only the boxes your answers made relevant appear.',
     'The grey pills along the top of the form show what you answered in step 1. Click “Change” next to them to go back and answer differently.',
   ],
@@ -39,6 +39,7 @@ const ANSWERED_SECTION = {
   p: 'These were asked before you reached this form, which is why you will not find boxes for them here:',
   bullets: [
     'Whether the loan has a moratorium — a “rest period” at the start when the borrower does not repay yet. How many months it lasts is asked on this form.',
+    'Whether the interest rate changes during the loan. No means one Offered Rate; Yes gives you the Interest Rate Layers table instead.',
     'Whether the payment style changes during the loan. No means one style throughout; Yes gives you the Payment Layers table instead.',
     'Which payment style it is — only asked when the style does NOT change.',
     'Click “Change” at the top of the form to revisit any of them.',
@@ -53,6 +54,19 @@ const IDP_SECTION = {
     'Indigo = Paid: the borrower pays that month’s interest right away.',
     'Purple = Capitalized: the interest is added on top of the loan, so later interest grows on it too.',
     'Use the three buttons on the right (“All to be …”) to set every month at once.',
+  ],
+};
+const RATE_LAYERS_SECTION = {
+  h: 'Interest Rate Layers',
+  p: 'Only there when you said in step 1 that the interest rate changes. It takes the place of the Offered Rate box: one row per stretch of the loan, each with its own rate.',
+  bullets: [
+    'Rows are counted in the loan’s own months. The first row always starts at Month 01, and each next row starts the month after the one before it ends — you only pick where each row ends (To Month).',
+    'The rate can change inside the moratorium too, because the months are the whole loan’s months, not the months after the rest period.',
+    'The last row must end at the loan’s final month. A row cannot end before it starts, and only the last row may reach the final month.',
+    'Rate Type — Commercial Rate: you type the rate. Refinance Rate: the rate is fixed at 5.00% and its box locks. Switch back to Commercial and whatever you had typed returns.',
+    'In Refinance months the bank’s cost of fund is 1% flat instead of the Total Cost of Fund you typed. Commercial months keep the Total Cost of Fund. The Loan Security Benefit always uses the Total Cost of Fund.',
+    'EMI and EQI are worked out again from the first payment that feels a new rate, so the loan still finishes at exactly zero. If a rate changes in the middle of a quarter, that quarter’s interest is split month by month.',
+    'Because some months may cost only 1%, the results also show the Effective COF — the cost of fund actually paid across the whole loan. ERR = Effective COF + NIM. A Refinance stretch pulls ERR down, since it only earns 5%, while its cheap funding keeps the NIM healthy.',
   ],
 };
 const SECURITY_LAYERS_SECTION = {
@@ -99,9 +113,17 @@ const MANUALS = {
   // Step 1 of Loan Facilities: only the questions actually on screen.
   questionsLoan: {
     title: 'Loan Facilities — the questions',
-    intro: 'Two or three short questions about the deal. They decide which boxes the next screen shows you, so you are never given fields that have nothing to do with your loan.',
+    intro: 'A few short questions about the deal. They decide which boxes the next screen shows you, so you are never given fields that have nothing to do with your loan.',
     sections: [
       MORATORIUM_Q,
+      {
+        h: 'Are there Multiple Layers of Interest Rates?',
+        p: 'This asks whether the interest rate stays the same for the whole loan, or changes at some point — with or without a moratorium.',
+        bullets: [
+          'No — one Offered Rate from start to finish.',
+          'Yes — for example 12% for the first 9 months and 14% afterwards, or a Refinance Rate for part of the loan. The form then gives you an Interest Rate Layers table instead of the single Offered Rate box.',
+        ],
+      },
       {
         h: 'Does the payment have multiple layers?',
         p: 'This asks whether the borrower pays the same way for the whole loan, or differently at different points in its life.',
@@ -158,11 +180,12 @@ const MANUALS = {
     intro: 'You said the loan is paid back the same way from start to finish. Fill the boxes from the top down; the schedule and the return build themselves on the right as you go.',
     sections: [
       { h: 'Loan Amount', p: 'The total money the bank hands over to the borrower. Type the whole amount, for example 100,000,000.' },
-      { h: 'Offered Rate', p: 'The yearly interest the bank charges, like 12%. Think of it as the price the borrower pays for using the money for one year.' },
+      { h: 'Offered Rate', p: 'The yearly interest the bank charges, like 12%. Think of it as the price the borrower pays for using the money for one year. If you said in step 1 that the rate changes, this box is replaced by the Interest Rate Layers table further down.' },
       ANSWERED_SECTION,
       { h: 'Moratorium Period (Months)', p: 'How many months the rest period lasts. For example, 6 means the first 6 months are the rest period. It only appears when you said there IS a moratorium.' },
       IDP_SECTION,
       { h: 'Loan Tenor (Months)', p: 'The total life of the loan in months, counting the rest period too. For example, 60 means the loan lasts 5 years.' },
+      RATE_LAYERS_SECTION,
       {
         h: 'Payment Mode — chosen in step 1',
         p: 'You picked this before reaching the form, so there is no box for it here; use “Change” at the top to swap it. The choices mean:',
@@ -195,7 +218,7 @@ const MANUALS = {
           'A rest period is simply the first few months set to Accrued or Capitalized, with principal starting later.',
         ],
       },
-      { h: 'Total Cost of Fund (COF/ISC + OPEX)', p: 'What it costs the bank to get this money, plus its running costs, as a yearly rate. The bank’s real earning is the gap between the Offered Rate and this number.' },
+      { h: 'Total Cost of Fund (COF/ISC + OPEX)', p: 'What it costs the bank to get this money, plus its running costs, as a yearly rate. The bank’s real earning is the gap between the Offered Rate and this number. With Interest Rate Layers, Refinance Rate months use 1% instead.' },
       {
         h: 'Funded Security Type',
         p: 'Sometimes the borrower also keeps some money parked with the bank as safety. Pick the type, or “No Funded Security” if there is none.',
@@ -214,11 +237,12 @@ const MANUALS = {
     intro: 'You said the payment style changes during the loan, so instead of one modality you build “Payment Layers” — one row per stretch of the loan, each with its own style.',
     sections: [
       { h: 'Loan Amount', p: 'The total money the bank hands over to the borrower. Type the whole amount, for example 100,000,000.' },
-      { h: 'Offered Rate', p: 'The yearly interest the bank charges, like 12% — the price of borrowing for one year.' },
+      { h: 'Offered Rate', p: 'The yearly interest the bank charges, like 12% — the price of borrowing for one year. Replaced by the Interest Rate Layers table when you said in step 1 that the rate changes.' },
       ANSWERED_SECTION,
       { h: 'Moratorium Period (Months)', p: 'How many months the rest period lasts. It only appears when you said there IS a moratorium.' },
       IDP_SECTION,
       { h: 'Loan Tenor (Months)', p: 'The total life of the loan in months, including the rest period.' },
+      RATE_LAYERS_SECTION,
       {
         h: 'Payment Layers',
         p: 'Instead of one payment style for the whole loan, you split the loan into time ranges and choose a style for each. For example: months 1–12 as EMI, then months 13–24 as EQI.',
@@ -232,7 +256,7 @@ const MANUALS = {
           'On a narrow screen the table becomes one card per layer, with each box labelled down the side.',
         ],
       },
-      { h: 'Total Cost of Fund (COF/ISC + OPEX)', p: 'What the money costs the bank plus running costs, as a yearly rate. The earning is the gap between the Offered Rate and this.' },
+      { h: 'Total Cost of Fund (COF/ISC + OPEX)', p: 'What the money costs the bank plus running costs, as a yearly rate. The earning is the gap between the Offered Rate and this. With Interest Rate Layers, Refinance Rate months use 1% instead.' },
       {
         h: 'Funded Security Type',
         p: 'Safety money the borrower keeps with the bank. Pick the type, or “No Funded Security” if there is none.',

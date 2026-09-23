@@ -6,7 +6,7 @@
 // that with two modules and a handful of questions the RM can actually answer; the answers
 // decide which form they land on, and are carried into it so nothing is asked twice.
 // ============================================================
-import { el, optionField } from './components.js?v=20260917l';
+import { el, optionField } from './components.js?v=20260923a';
 
 export const MODALITIES = [
   'EMI', 'EQI',
@@ -77,6 +77,15 @@ export function renderQuestions(root, ctx, go) {
     onChange: () => refresh(),
   });
 
+  // Asked whether or not there is a moratorium: a rate can change inside the moratorium, after
+  // it, or on a loan that has none (a Refinance Rate for part of the tenor, say).
+  const rates = optionField({
+    label: 'Are there Multiple Layers of Interest Rates?', name: 'qRates',
+    options: [{ label: 'select', value: '' }, 'No', 'Yes'], value: a.rateLayers || '',
+    help: 'Pick Yes if the interest rate changes at any point in the loan’s life, including a switch to a Refinance Rate.',
+    onChange: () => refresh(),
+  });
+
   const layers = optionField({
     label: 'Does the payment have multiple layers?', name: 'qLayers',
     options: [{ label: 'select', value: '' }, 'No', 'Yes'], value: a.multiLayers || '',
@@ -90,12 +99,13 @@ export function renderQuestions(root, ctx, go) {
   });
 
   const moraRow = el('div', { class: 'form-row' }, mora);
+  const ratesRow = el('div', { class: 'form-row' }, rates);
   const layersRow = el('div', { class: 'form-row' }, layers);
   const modalityRow = el('div', { class: 'form-row' }, modality);
 
   const contBtn = el('button', { class: 'primary-btn', type: 'button' }, 'Continue');
 
-  const card = el('div', { class: 'section-card' }, moraRow, layersRow, modalityRow,
+  const card = el('div', { class: 'section-card' }, moraRow, ratesRow, layersRow, modalityRow,
     el('div', { class: 'action-bar' }, contBtn));
 
   root.appendChild(el('div', { class: 'screen' },
@@ -106,6 +116,8 @@ export function renderQuestions(root, ctx, go) {
   // How many months is asked on the form itself; here we only need to know whether there
   // is a moratorium at all, since that is what the later labels and routing depend on.
   const moraAnswered = () => !!mora.getValue();
+  // Revision has no rates question (its Lending Rate Layers already carry every change).
+  const ratesAnswered = () => !isLoan || !!rates.getValue();
   // Revision has no layers question, so it always needs a modality.
   const needsModality = () => !isLoan || layers.getValue() === 'No';
 
@@ -113,16 +125,17 @@ export function renderQuestions(root, ctx, go) {
     const yes = mora.getValue() === 'Yes';
 
     // Each question appears only once the one before it is settled.
-    layersRow.classList.toggle('hidden', !isLoan || !moraAnswered());
+    ratesRow.classList.toggle('hidden', !isLoan || !moraAnswered());
+    layersRow.classList.toggle('hidden', !isLoan || !moraAnswered() || !ratesAnswered());
     layers.setLabel(yes
       ? 'Does the payment after the moratorium have multiple layers?'
       : 'Does the payment have multiple layers?');
 
-    const showModality = moraAnswered() && needsModality() && (!isLoan || !!layers.getValue());
+    const showModality = moraAnswered() && ratesAnswered() && needsModality() && (!isLoan || !!layers.getValue());
     modalityRow.classList.toggle('hidden', !showModality);
     modality.setLabel(yes ? 'Payment Modality After Moratorium' : 'Payment Modality');
 
-    const done = moraAnswered()
+    const done = moraAnswered() && ratesAnswered()
       && (!isLoan || !!layers.getValue())
       && (!showModality || !!modality.getValue());
     contBtn.disabled = !done;
@@ -132,6 +145,7 @@ export function renderQuestions(root, ctx, go) {
   contBtn.addEventListener('click', () => {
     const answers = {
       moratorium: mora.getValue(),
+      rateLayers: isLoan ? rates.getValue() : 'No',
       multiLayers: isLoan ? layers.getValue() : 'No',
       modality: needsModality() ? modality.getValue() : null,
     };
@@ -150,6 +164,7 @@ export function answerSummary(ctx, onEdit) {
   const a = ctx.answers || {};
   const bits = [];
   bits.push(a.moratorium === 'Yes' ? 'Moratorium' : 'No moratorium');
+  if (ctx.module === 'loan') bits.push(a.rateLayers === 'Yes' ? 'Multiple interest rates' : 'Single interest rate');
   if (ctx.module === 'loan') bits.push(a.multiLayers === 'Yes' ? 'Multiple payment layers' : 'Single modality');
   if (a.modality) bits.push(a.modality);
 

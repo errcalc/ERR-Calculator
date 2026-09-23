@@ -1,6 +1,6 @@
 // Excel / Word / PDF I/O via CDN libs
-import { formatMoney as fmtM, formatPercent as fmtP } from './formatting.js?v=20260916a';
-import { SPLIT_MODE } from './calculations.js?v=20260916a';
+import { formatMoney as fmtM, formatPercent as fmtP, formatRateLayers } from './formatting.js?v=20260923a';
+import { SPLIT_MODE, REFINANCE_RATE, REFINANCE_LENDING_RATE, REFINANCE_COF } from './calculations.js?v=20260923a';
 
 // Funded Security as it READS on screen. The stored value is always "<kind> after Moratorium",
 // but on a loan with no moratorium the UI shows "<kind> Installment" — the workbook and the PDF
@@ -83,6 +83,7 @@ function buildScheduleAoA(schedule, meta) {
   const hasIDP = rows.some(r => (r.idpReceivable || 0) > 0);
   const headers = ['Sl.', ...(hasDate ? ['Date'] : []), 'Installment', 'Interest', 'Principal', 'URPA'];
   if (hasIDP) headers.push('Accrued Interest');
+  if (meta.showRate) headers.push('Interest Rate');
   aoa.push(headers);
 
   let tInst = 0, tInt = 0, tPrin = 0, tAcc = 0;
@@ -91,12 +92,14 @@ function buildScheduleAoA(schedule, meta) {
     if (hasDate) row.push(r.date || '');
     row.push(num(r.installment), num(r.interest), num(r.principal), num(r.urpa));
     if (hasIDP) row.push(num(r.idpReceivable || 0));
+    if (meta.showRate) row.push(r.sl > 0 ? fmtP(r.rate) : '');
     aoa.push(row);
     tInst += Number(r.installment) || 0; tInt += Number(r.interest) || 0;
     tPrin += Number(r.principal) || 0; tAcc += Number(r.idpReceivable) || 0;
   }
   const total = ['Total', ...(hasDate ? [''] : []), num(tInst), num(tInt), num(tPrin), ''];
   if (hasIDP) total.push(num(tAcc));
+  if (meta.showRate) total.push('');
   aoa.push(total);
   return aoa;
 }
@@ -110,6 +113,7 @@ export async function downloadScheduleAsWord(filename, schedule, meta = {}) {
   const hasIDP = rows.some(r => (r.idpReceivable || 0) > 0);
   const headers = ['Sl.', ...(hasDate ? ['Date'] : []), 'Installment', 'Interest', 'Principal', 'URPA'];
   if (hasIDP) headers.push('Accrued Interest');
+  if (meta.showRate) headers.push('Interest Rate');
 
   // Cell centered both horizontally and vertically.
   const cell = (text, bold = false) => new TableCell({
@@ -123,12 +127,14 @@ export async function downloadScheduleAsWord(filename, schedule, meta = {}) {
     if (hasDate) cells.push(r.date || '');
     cells.push(fmtM(r.installment), fmtM(r.interest), fmtM(r.principal), fmtM(r.urpa));
     if (hasIDP) cells.push(fmtM(r.idpReceivable || 0));
+    if (meta.showRate) cells.push(r.sl > 0 ? fmtP(r.rate) : '');
     tInst += Number(r.installment) || 0; tInt += Number(r.interest) || 0;
     tPrin += Number(r.principal) || 0; tAcc += Number(r.idpReceivable) || 0;
     return new TableRow({ children: cells.map(c => cell(c)) });
   });
   const totalCells = ['Total', ...(hasDate ? [''] : []), fmtM(tInst), fmtM(tInt), fmtM(tPrin), ''];
   if (hasIDP) totalCells.push(fmtM(tAcc));
+  if (meta.showRate) totalCells.push('');
   const totalRow = new TableRow({ children: totalCells.map(c => cell(c, true)) });
 
   const children = [];
@@ -160,18 +166,21 @@ export function downloadScheduleAsPDF(filename, schedule, meta = {}) {
   const hasIDP = rows.some(r => (r.idpReceivable || 0) > 0);
   const headers = ['Sl.', ...(hasDate ? ['Date'] : []), 'Installment', 'Interest', 'Principal', 'URPA'];
   if (hasIDP) headers.push('Accrued Interest');
+  if (meta.showRate) headers.push('Interest Rate');
   let tInst = 0, tInt = 0, tPrin = 0, tAcc = 0;
   const body = rows.map(r => {
     const row = [String(r.sl)];
     if (hasDate) row.push(r.date || '');
     row.push(fmtM(r.installment), fmtM(r.interest), fmtM(r.principal), fmtM(r.urpa));
     if (hasIDP) row.push(fmtM(r.idpReceivable || 0));
+    if (meta.showRate) row.push(r.sl > 0 ? fmtP(r.rate) : '');
     tInst += Number(r.installment) || 0; tInt += Number(r.interest) || 0;
     tPrin += Number(r.principal) || 0; tAcc += Number(r.idpReceivable) || 0;
     return row;
   });
   const foot = ['Total', ...(hasDate ? [''] : []), fmtM(tInst), fmtM(tInt), fmtM(tPrin), ''];
   if (hasIDP) foot.push(fmtM(tAcc));
+  if (meta.showRate) foot.push('');
   doc.autoTable({
     head: [headers], body, foot: [foot], startY: y,
     showFoot: 'lastPage',
@@ -249,6 +258,13 @@ export function downloadVerificationExcel(filename, ctx) {
   const { schedule, inputs, metrics, pageTitle, pageType, params = {} } = ctx;
   const cof = params.cofRate || 0;
   const mora = params.moratoriumMonths || 0;
+  // Interest-rate layers (Loan Facilities): the rate and COF vary by month, so they live on a
+  // Rate_Layers sheet and every Schedule row quotes its own layer's cells in columns J and K.
+  const rateLayers = Array.isArray(params.rateLayers) && params.rateLayers.length ? params.rateLayers : null;
+  const layerRowFor = (m) => {
+    const k = rateLayers.findIndex(L => m >= L.from && m <= L.to);
+    return 2 + (k < 0 ? rateLayers.length - 1 : k); // header on row 1, layer 1 on row 2
+  };
   // When moratorium interest is capitalized, the outstanding grows during the moratorium.
   // For those rows (and the EPI-principal / funded-security cells that depend on the grown
   // principal) the verify sheet uses the exact engine value so it matches the app.
@@ -268,7 +284,8 @@ export function downloadVerificationExcel(filename, ctx) {
   //   Where the page has no single Rate/COF input (Rate Revision Customized), the formula
   //   falls back to a hardcoded value so the column still totals correctly.
   const schedHeaders = ['Sl.', 'Installment', 'Interest', 'Principal', 'URPA', 'Int. Expense (URPA*COF/12)', 'Accrued Interest',
-                        'NIM (Yield to Maturity)', 'ERR (Yield to Maturity)'];
+                        'NIM (Yield to Maturity)', 'ERR (Yield to Maturity)',
+                        ...(rateLayers ? ['Interest Rate (month)', 'COF (month)'] : [])];
   const wsSched = {};
   schedHeaders.forEach((h, c) => setCell(wsSched, XLSX.utils.encode_cell({ r: 0, c }), h, { text: true, s: STYLE.greenHeader }));
 
@@ -281,6 +298,9 @@ export function downloadVerificationExcel(filename, ctx) {
   const _idx = inputIndex(_inputLines, 5); // input rows start at Excel row 5
   const inputsSheet = `'Inputs & Results'!`;
   const RATE_REF = _idx.offeredRate ? `${inputsSheet}B${_idx.offeredRate}` : null;
+  // The rate an installment-sized security is sized at: the Offered Rate, or with layers the
+  // rate in force when repayment starts (the month after the moratorium).
+  const SIZE_RATE_REF = rateLayers ? `Rate_Layers!$E$${layerRowFor(mora + 1)}` : RATE_REF;
   const LOAN_REF = _idx.loanAmount ? `${inputsSheet}B${_idx.loanAmount}` : null;
   const COF_REF = _idx.totalCof ? `${inputsSheet}B${_idx.totalCof}` : null;
   const TENOR_REF = _idx.loanTenor ? `${inputsSheet}B${_idx.loanTenor}` : null;
@@ -358,7 +378,26 @@ export function downloadVerificationExcel(filename, ctx) {
 
     // Interest (C) = URPA_prev * Rate / (12 or 4). Always a formula when a rate input exists.
     // Maturity stub (quarterly grid short of maturity) accrues nominal months: Rate*(1 or 2)/12.
-    if (RATE_REF && r.interest > 0) {
+    // Rate layers: each month earns its own rate, so the row sums column J over the months its
+    // interest covers — URPA_prev * SUM(J..)/12 — which splits a quarter that straddles a rate
+    // change by month. The month count is checked against the engine's own figure before the
+    // formula is emitted; a row it cannot reproduce keeps the engine value instead.
+    const n = isSplitRow ? 1 : (r.stubMonths || (isQuarterly ? 3 : 1));
+    const prevUrpa = schedule.rows[i - 1].urpa || 0;
+    let layeredIntOk = false;
+    if (rateLayers && r.interest > 0 && n <= r.sl) {
+      let f = 0;
+      for (let k = r.sl - n + 1; k <= r.sl; k++) f += (schedule.rows[k].rate || 0) / 12;
+      layeredIntOk = Math.abs(prevUrpa * f - r.interest) < 0.005;
+    }
+    if (rateLayers) {
+      if (layeredIntOk) {
+        const rates = n === 1 ? `J${xr}` : `SUM(J${xr - n + 1}:J${xr})`;
+        setCell(wsSched, `C${xr}`, 0, { f: `E${pr}*${rates}/12`, z: FMT.ACCOUNTING });
+      } else {
+        setCell(wsSched, `C${xr}`, num(r.interest), { z: FMT.ACCOUNTING });
+      }
+    } else if (RATE_REF && r.interest > 0) {
       const intFormula = (r.stubMonths && !isSplitRow)
         ? `E${pr}*${RATE_REF}${r.stubMonths === 2 ? '*2' : ''}/12`
         : `E${pr}*${RATE_REF}/${isSplitRow ? 12 : divisor}`;
@@ -413,8 +452,14 @@ export function downloadVerificationExcel(filename, ctx) {
       setCell(wsSched, `E${xr}`, 0, { f: `E${pr}-D${xr}`, z: FMT.ACCOUNTING });
     }
 
-    // Int Expense (F) = URPA_prev * COF / 12 — accrues every month sl=1..N
-    if (COF_REF) {
+    // Int Expense (F) = URPA_prev * COF / 12 — accrues every month sl=1..N. With rate layers
+    // the COF is the month's own (column K): 1% flat in Refinance months, Total COF otherwise.
+    if (rateLayers) {
+      const lr = layerRowFor(r.sl);
+      setCell(wsSched, `J${xr}`, 0, { f: `Rate_Layers!$E$${lr}`, z: FMT.PCT2 });
+      setCell(wsSched, `K${xr}`, 0, { f: `Rate_Layers!$F$${lr}`, z: FMT.PCT2 });
+      setCell(wsSched, `F${xr}`, 0, { f: `E${pr}*K${xr}/12`, z: FMT.ACCOUNTING });
+    } else if (COF_REF) {
       setCell(wsSched, `F${xr}`, 0, { f: `E${pr}*${COF_REF}/12`, z: FMT.ACCOUNTING });
     } else {
       setCell(wsSched, `F${xr}`, num(r.interestExpense || 0), { z: FMT.ACCOUNTING });
@@ -490,7 +535,7 @@ export function downloadVerificationExcel(filename, ctx) {
     }
   }
 
-  wsSched['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: totalRowIdx, c: 8 } });
+  wsSched['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: totalRowIdx, c: schedHeaders.length - 1 } });
   wsSched['!cols'] = schedHeaders.map((h, c) => ({ wch: c >= 7 ? 20 : 18 }));
 
   // ----- Inputs & Results sheet
@@ -511,13 +556,16 @@ export function downloadVerificationExcel(filename, ctx) {
   // Input rows starting at row 5
   const inputStartRow = 5;
   const idx = inputIndex(inputLines, inputStartRow);
-  inputLines.forEach(([label, value], i) => {
+  inputLines.forEach(([label, value, tag], i) => {
     const r = inputStartRow + i;
     setCell(wsInputs, `A${r}`, label, { text: true });
     const labelLower = label.toLowerCase();
-    const isPct = ['offered rate', 'total cof', 'cash security / fdr rate'].some(k => labelLower.includes(k));
-    const isMoney = ['loan amount', 'cash security / fdr amount', 'initial loan amount'].some(k => labelLower.includes(k));
-    const isInt = ['moratorium period', 'loan tenor', 'number of installments'].some(k => labelLower.includes(k));
+    const isPct = ['offeredRate', 'totalCof', 'csRate'].includes(tag)
+      || ['offered rate', 'total cof'].some(k => labelLower.includes(k));
+    const isMoney = ['loanAmount', 'csAmount'].includes(tag)
+      || ['loan amount', 'initial loan amount'].some(k => labelLower.includes(k));
+    const isInt = ['moratoriumPeriod', 'loanTenor', 'numInst'].includes(tag)
+      || ['moratorium period', 'loan tenor', 'number of installments'].some(k => labelLower.includes(k));
     if (typeof value === 'number') {
       if (isPct) setCell(wsInputs, `B${r}`, value, { z: FMT.PCT2 });
       else if (isMoney) setCell(wsInputs, `B${r}`, value, { z: FMT.ACCOUNTING });
@@ -535,11 +583,11 @@ export function downloadVerificationExcel(filename, ctx) {
     if (capitalize) {
       // Sized on the capitalized (grown) principal — write the derived amount directly.
       setCell(wsInputs, `B${idx.csAmount}`, num(metrics.derivedSecurityAmount || 0), { z: FMT.ACCOUNTING });
-    } else if (RATE_REF && LOAN_REF && TENOR_REF && MORA_REF) {
+    } else if (SIZE_RATE_REF && LOAN_REF && TENOR_REF && MORA_REF) {
       const nMul = idx.numInst ? `*B${idx.numInst}` : '';
       const pmt = secKind.startsWith('EQI')
-        ? `PMT(${RATE_REF}/4,(${TENOR_REF}-${MORA_REF})/3,-${LOAN_REF},,0)`
-        : `PMT(${RATE_REF}/12,${TENOR_REF}-${MORA_REF},-${LOAN_REF},,0)`;
+        ? `PMT(${SIZE_RATE_REF}/4,(${TENOR_REF}-${MORA_REF})/3,-${LOAN_REF},,0)`
+        : `PMT(${SIZE_RATE_REF}/12,${TENOR_REF}-${MORA_REF},-${LOAN_REF},,0)`;
       setCell(wsInputs, `B${idx.csAmount}`, 0, { f: `${pmt}${nMul}`, z: FMT.ACCOUNTING });
     }
   }
@@ -560,7 +608,13 @@ export function downloadVerificationExcel(filename, ctx) {
     ? `B${csAmt}*(B${cofRow}-B${csRate})*B${tenor}/12` : null;
   const nimF = tenor ? (ref) =>
     `IF(B${ref.avgPortfolio}*(B${tenor}/12)=0,0,B${ref.netII}/B${ref.avgPortfolio}/(B${tenor}/12))` : null;
-  const errF = cofRow ? (ref) => `B${cofRow}+B${ref.nim}` : null;
+  // With rate layers the COF half of ERR is the Effective COF actually paid — interest expense
+  // over the average portfolio per year — since Refinance months run on 1%, not Total COF.
+  const effCofF = tenor ? (ref) =>
+    `IF(B${ref.avgPortfolio}*(B${tenor}/12)=0,0,B${ref.totalIntExpense}/B${ref.avgPortfolio}/(B${tenor}/12))` : null;
+  const errF = rateLayers
+    ? (tenor ? (ref) => `B${ref.effCof}+B${ref.nim}` : null)
+    : (cofRow ? (ref) => `B${cofRow}+B${ref.nim}` : null);
 
   const resultRows = [
     { key: 'totalIntReceived', label: 'Total Interest Received', f: `Schedule!C${totalRowExcel}`,         z: FMT.ACCOUNTING },
@@ -572,6 +626,8 @@ export function downloadVerificationExcel(filename, ctx) {
     // and the original "Sample format for verification" (E2:E61 for a 60-mo loan, not E62).
     { key: 'avgPortfolio',     label: 'Avg Portfolio',           f: `AVERAGE(Schedule!E2:E${lastDataRow - 1})`, z: FMT.ACCOUNTING },
     { key: 'nim',              label: 'NIM',                     f: nimF,                                  z: FMT.PCT4 },
+    ...(rateLayers ? [
+      { key: 'effCof',         label: 'Effective COF',           f: effCofF,                               z: FMT.PCT4 }] : []),
     { key: 'err',              label: 'Effective Rate (ERR)',    f: errF,                                  z: FMT.PCT4 },
   ];
   const ref = {};
@@ -646,6 +702,9 @@ export function downloadVerificationExcel(filename, ctx) {
   ];
 
   XLSX.utils.book_append_sheet(wb, wsInputs, 'Inputs & Results');
+  if (rateLayers) {
+    XLSX.utils.book_append_sheet(wb, buildRateLayersSheet(inputs.intRateLayers || [], COF_REF), 'Rate_Layers');
+  }
   // Rate Revision — Customized: add the Loan Security + COF + ISC layer tables on their own sheet
   // (no Lending Rate table — the rate schedule is already baked into the uploaded amortization).
   if (pageType === 'revisionCustomized') {
@@ -1129,49 +1188,87 @@ function buildLayersSheet(rateLayers, securityLayers, cofRecs, includeLending = 
   return wsL;
 }
 
+// Rate_Layers sheet for rate-layered Loan Facilities. One row per layer; the Schedule's columns
+// J (rate) and K (COF) quote these cells, so editing a rate here flows through every month it
+// covers. A Commercial layer's COF is the Inputs sheet's Total COF (a live reference); a
+// Refinance layer's rate and COF are the scheme's fixed pair.
+function buildRateLayersSheet(layers, cofRef) {
+  const ws = {};
+  const heads = ['Layer', 'From Month', 'To Month', 'Rate Type', 'Interest Rate', 'COF'];
+  heads.forEach((h, c) => setCell(ws, XLSX.utils.encode_cell({ r: 0, c }), h, { text: true, s: STYLE.greenHeader }));
+  layers.forEach((L, i) => {
+    const r = i + 2;
+    const refi = L.rateType === REFINANCE_RATE;
+    setCell(ws, `A${r}`, i + 1, { s: STYLE.cellCenter });
+    setCell(ws, `B${r}`, L.fromMonth, { s: STYLE.cellCenter });
+    setCell(ws, `C${r}`, L.toMonth, { s: STYLE.cellCenter });
+    setCell(ws, `D${r}`, L.rateType, { text: true, s: STYLE.cellCenter });
+    setCell(ws, `E${r}`, refi ? REFINANCE_LENDING_RATE : (L.rate || 0), { z: FMT.PCT2, s: STYLE.cellCenter });
+    if (refi || !cofRef) setCell(ws, `F${r}`, refi ? REFINANCE_COF : 0, { z: FMT.PCT2, s: STYLE.cellCenter });
+    else setCell(ws, `F${r}`, 0, { f: cofRef, z: FMT.PCT2, s: STYLE.cellCenter });
+  });
+  const noteRow = layers.length + 3;
+  setCell(ws, `A${noteRow}`,
+    `Refinance Rate layers lend at ${fmtP(REFINANCE_LENDING_RATE)} and are funded at ${fmtP(REFINANCE_COF)} flat; ` +
+    'Commercial Rate layers use the Total COF on the Inputs & Results sheet. The Loan Security Benefit always uses Total COF.',
+    { text: true });
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: noteRow - 1, c: heads.length - 1 } });
+  ws['!cols'] = [{ wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 18 }, { wch: 14 }, { wch: 12 }];
+  return ws;
+}
+
 // If security type is installment-based, the input csAmount is empty —
 // substitute the model's derived amount stored on metrics (passed as `inp._derived`).
 function securityAmtFor(inp, key) {
   return inp._derived && inp._derived[key] !== undefined ? inp._derived[key] : null;
 }
 
-// Build list of [label, value] for the Inputs section based on page type
+// Build list of [label, value, key?] for the Inputs section based on page type. The optional
+// third element names the input for inputIndex, so formulas find their cell by key rather than by
+// label text — the security lines are labelled after the chosen security ("FDR Amount"), which
+// no fixed label match can follow.
 function collectInputLinesFor(pageType, inp) {
   const yesNo = (v) => (v === 'Yes' || v === true ? 'Yes' : 'No');
+  // A layered loan has no single Offered Rate; the layers are listed on the Rate_Layers sheet
+  // (Verification Excel) or under the inputs (Report PDF).
+  const rateLine = inp.rateLayered
+    ? ['Interest Rate Layers', (inp.intRateLayers || []).length + ' layer(s)']
+    : ['Offered Rate', inp.offeredRate ?? 0, 'offeredRate'];
+  const secType = String(inp.fundedSecurityType || '');
+  const secName = (secType && secType !== 'No Funded Security') ? securityTypeLabel(inp) : 'Funded Security';
+  const securityLines = [
+    ['Total COF (COF/ISC + OPEX)', inp.totalCof ?? 0, 'totalCof'],
+    ['Funded Security Type', securityTypeLabel(inp)],
+    ['Number of Installments (security)', inp.numInst ?? 0, 'numInst'],
+    [`${secName} Amount`, securityAmtFor(inp, 'derivedSecurityAmount') ?? (inp.csAmount ?? 0), 'csAmount'],
+    [`${secName} Rate`, inp.csRate ?? 0, 'csRate'],
+  ];
   if (pageType === 'regular') {
     // The split type carries no moratorium fields — a moratorium is expressed in the interest
     // grid plus a later principal start, so those two lines are replaced by its own settings.
     const splitLines = isSplitCtx(inp) ? splitInputLines(inp, '') : null;
     return [
-      ['Offered Rate', inp.offeredRate ?? 0],
-      ['Loan Amount', inp.loanAmount ?? 0],
+      rateLine,
+      ['Loan Amount', inp.loanAmount ?? 0, 'loanAmount'],
       ...(splitLines || [
       ['Moratorium Available?', yesNo(inp.moratoriumAvail)],
-      ['Moratorium Period (Months)', inp.moratoriumPeriod ?? 0]]),
-      ['Loan Tenor including Moratorium (Months)', inp.loanTenor ?? 0],
+      ['Moratorium Period (Months)', inp.moratoriumPeriod ?? 0, 'moratoriumPeriod']]),
+      ['Loan Tenor including Moratorium (Months)', inp.loanTenor ?? 0, 'loanTenor'],
       ['Payment Mode', inp.paymentMode ?? ''],
-      ['Total COF (COF/ISC + OPEX)', inp.totalCof ?? 0],
-      ['Funded Security Type', securityTypeLabel(inp)],
-      ['Number of Installments (security)', inp.numInst ?? 0],
-      [`${securityTypeLabel(inp) || 'Funded Security'} Amount`, securityAmtFor(inp, 'derivedSecurityAmount') ?? (inp.csAmount ?? 0)],
-      [`${securityTypeLabel(inp) || 'Funded Security'} Rate`, inp.csRate ?? 0],
+      ...securityLines,
     ];
   }
   if (pageType === 'customized') {
     return [
-      ['Offered Rate', inp.offeredRate ?? 0],
-      ['Loan Amount', inp.loanAmount ?? 0],
+      rateLine,
+      ['Loan Amount', inp.loanAmount ?? 0, 'loanAmount'],
       ['Moratorium Available?', yesNo(inp.moratoriumAvail)],
-      ['Moratorium Period (Months)', inp.moratoriumPeriod ?? 0],
-      ['Loan Tenor including Moratorium (Months)', inp.loanTenor ?? 0],
+      ['Moratorium Period (Months)', inp.moratoriumPeriod ?? 0, 'moratoriumPeriod'],
+      ['Loan Tenor including Moratorium (Months)', inp.loanTenor ?? 0, 'loanTenor'],
       ['Payment Layers', (inp.paymentLayers || []).length + ' layer(s)'
         + ((inp.paymentLayers || []).filter(L => L.paymentType === SPLIT_MODE)
             .map(L => ` — months ${L.fromInstallment}-${L.toInstallment}: ${L.intFreq} interest / ${L.prinFreq} principal`).join('') || '')],
-      ['Total COF (COF/ISC + OPEX)', inp.totalCof ?? 0],
-      ['Funded Security Type', securityTypeLabel(inp)],
-      ['Number of Installments (security)', inp.numInst ?? 0],
-      [`${securityTypeLabel(inp) || 'Funded Security'} Amount`, securityAmtFor(inp, 'derivedSecurityAmount') ?? (inp.csAmount ?? 0)],
-      [`${securityTypeLabel(inp) || 'Funded Security'} Rate`, inp.csRate ?? 0],
+      ...securityLines,
     ];
   }
   if (pageType === 'revisionStructured') {
@@ -1205,8 +1302,9 @@ function collectInputLinesFor(pageType, inp) {
 
 function inputIndex(lines, start) {
   const idx = {};
-  lines.forEach(([label], i) => {
+  lines.forEach(([label, , tag], i) => {
     const row = start + i;
+    if (tag) { idx[tag] = row; return; }
     const key = label.toLowerCase();
     if (key === 'offered rate') idx.offeredRate = row;
     else if (key === 'loan amount' || key === 'initial loan amount') idx.loanAmount = row;
@@ -1233,10 +1331,14 @@ function computeYearlySummary(ctx) {
   const secAmt = m.derivedSecurityAmount != null ? m.derivedSecurityAmount : (inp.csAmount || 0);
   const secRate = m.derivedSecurityRate != null ? m.derivedSecurityRate : (inp.csRate || 0);
 
+  // Rate-layered Loan Facilities: COF varies by month (1% in Refinance months), so take the
+  // engine's own per-row expense rather than a flat Total COF.
+  const layered = !!(params.rateLayers && params.rateLayers.length);
+
   // Per-row interest expense + CS benefit (units = per month).
   const per = rows.map((r, i) => {
     const prevUrpa = i > 0 ? (rows[i - 1].urpa || 0) : (r.urpa || 0);
-    const intExp = isRevision ? (r.interestExpense || 0) : (i > 0 ? prevUrpa * cofRate / 12 : 0);
+    const intExp = (isRevision || layered) ? (r.interestExpense || 0) : (i > 0 ? prevUrpa * cofRate / 12 : 0);
     const csBen = isRevision
       ? ((r.cof || 0) - (r.securityRate || 0)) * (r.securityAmount || 0) / 12
       : (cofRate - secRate) * secAmt / 12;
@@ -1294,6 +1396,13 @@ export function downloadReportPDF(filename, ctx) {
       extras.push([`Payment Layer ${i + 1}`, `${L.paymentType}: Month ${L.fromInstallment}–${L.toInstallment}` + (L.customPrincipal ? ` @ ${fmtM(L.customPrincipal)}/inst` : '')]);
     });
   }
+  if (ctx.inputs.rateLayered && Array.isArray(ctx.inputs.intRateLayers)) {
+    const pad = (m) => String(m).padStart(2, '0');
+    ctx.inputs.intRateLayers.forEach((L, i) => {
+      const cofNote = L.rateType === REFINANCE_RATE ? ` (COF ${fmtP(REFINANCE_COF)})` : '';
+      extras.push([`Interest Rate Layer ${i + 1}`, `Months ${pad(L.fromMonth)}–${pad(L.toMonth)}: ${L.rateType} ${fmtP(L.rate)}${cofNote}`]);
+    });
+  }
   if (Array.isArray(ctx.inputs.rateLayers)) {
     ctx.inputs.rateLayers.forEach((L, i) => {
       extras.push([`Rate Layer ${i + 1}`, `${L.fromDate} – ${L.toDate}: ${fmtP(L.activeRate)}`]);
@@ -1335,6 +1444,7 @@ export function downloadReportPDF(filename, ctx) {
   y = doc.lastAutoTable.finalY + 18;
 
   // Results
+  const reportLayered = !!(ctx.params && ctx.params.rateLayers);
   doc.setFont(undefined, 'bold'); doc.setFontSize(12);
   doc.text('Results', 40, y); y += 10;
   doc.autoTable({
@@ -1342,6 +1452,7 @@ export function downloadReportPDF(filename, ctx) {
     body: [
       ['Effective Rate (ERR)', fmtP(ctx.metrics.effectiveRate)],
       ['NIM', fmtP(ctx.metrics.nim)],
+      ...(reportLayered ? [['Effective COF', fmtP(ctx.metrics.effectiveCof)]] : []),
       ['Net Interest Income', fmtM(ctx.metrics.nii)],
       ['Avg Portfolio', fmtM(ctx.metrics.avgPortfolio)],
       ['Total Interest', fmtM(ctx.metrics.totalInterest)],
@@ -1378,16 +1489,19 @@ export function downloadReportPDF(filename, ctx) {
   doc.setFont(undefined, 'bold'); doc.setFontSize(12);
   doc.text('Amortization Schedule', 40, y); y += 10;
   const hasDate = ctx.schedule.rows[0]?.date !== undefined;
-  const headers = ['Sl.', ...(hasDate ? ['Date'] : []), 'Installment', 'Interest', 'Principal', 'URPA'];
+  const headers = ['Sl.', ...(hasDate ? ['Date'] : []), 'Installment', 'Interest', 'Principal', 'URPA',
+    ...(reportLayered ? ['Rate', 'COF'] : [])];
   let tInst = 0, tInt = 0, tPrin = 0;
   const body = ctx.schedule.rows.map(r => {
     const row = [String(r.sl)];
     if (hasDate) row.push(r.date || '');
     row.push(fmtM(r.installment), fmtM(r.interest), fmtM(r.principal), fmtM(r.urpa));
+    if (reportLayered) row.push(r.sl > 0 ? fmtP(r.rate) : '', r.sl > 0 ? fmtP(r.cof) : '');
     tInst += Number(r.installment) || 0; tInt += Number(r.interest) || 0; tPrin += Number(r.principal) || 0;
     return row;
   });
-  const schedFoot = ['Total', ...(hasDate ? [''] : []), fmtM(tInst), fmtM(tInt), fmtM(tPrin), ''];
+  const schedFoot = ['Total', ...(hasDate ? [''] : []), fmtM(tInst), fmtM(tInt), fmtM(tPrin), '',
+    ...(reportLayered ? ['', ''] : [])];
   doc.autoTable({
     head: [headers], body, foot: [schedFoot],
     startY: y,

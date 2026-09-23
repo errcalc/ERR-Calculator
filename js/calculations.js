@@ -8,6 +8,61 @@ export const SPLIT_MODE = 'Interest & Principal (Separate Frequency)';
 export const FREQ = { Monthly: 1, Quarterly: 3, 'Half-yearly': 6, Yearly: 12 };
 export const FREQ_NAMES = Object.keys(FREQ);
 
+// Interest-rate layers (Loan Facilities). A Refinance layer lends at a fixed 5% and is funded at
+// a fixed 1% flat — the pair the refinance scheme sets, so neither is typed by the RM. Commercial
+// layers carry the RM's own rate and the form's Total COF. Change the scheme's numbers here.
+export const COMMERCIAL_RATE = 'Commercial Rate';
+export const REFINANCE_RATE = 'Refinance Rate';
+export const REFINANCE_LENDING_RATE = 0.05;
+export const REFINANCE_COF = 0.01;
+
+// The rate layer covering month m. Layers are [{ from, to, type, rate }] in month numbers;
+// a month outside every layer falls to the nearest end, so a lookup never comes back empty.
+function rateLayerAt(layers, m) {
+  const L = layers.find(x => m >= x.from && m <= x.to);
+  if (L) return L;
+  return m < layers[0].from ? layers[0] : layers[layers.length - 1];
+}
+
+// Month-by-month lending rate and COF. Without rate layers every month gets the Offered Rate
+// and the Total COF, and `layered` is false so each builder keeps its original arithmetic —
+// no existing schedule moves by even a rounding step.
+function rateBook(p) {
+  const layers = Array.isArray(p.rateLayers) && p.rateLayers.length
+    ? p.rateLayers.slice().sort((a, b) => a.from - b.from) : null;
+  const rate = (m) => {
+    if (!layers) return p.ratePerYear;
+    const L = rateLayerAt(layers, m);
+    return L.type === REFINANCE_RATE ? REFINANCE_LENDING_RATE : (L.rate || 0);
+  };
+  const cof = (m) => {
+    if (!layers) return p.cofRate || 0;
+    return rateLayerAt(layers, m).type === REFINANCE_RATE ? REFINANCE_COF : (p.cofRate || 0);
+  };
+  return {
+    layered: !!layers,
+    rate, cof,
+    // Interest factor for months a..b: each month earns its own rate for 1/12 of a year, so a
+    // quarter that straddles a rate change is split by month (the 30/360 split, in whole months).
+    factor(a, b) { let s = 0; for (let k = a; k <= b; k++) s += rate(k); return s / 12; },
+    uniform(a, b) { const r = rate(a); for (let k = a + 1; k <= b; k++) if (rate(k) !== r) return false; return true; },
+  };
+}
+
+// Lending rate in force in month m — the Offered Rate, or the layer covering m.
+export function rateInMonth(p, m) { return rateBook(p).rate(m); }
+
+// Level installment that clears `balance` by maturity when THIS period earns `interest` and the
+// `remaining - 1` periods after it earn `periodRate` each: the closed form of a goal seek,
+//   X = (balance + interest) / (1 + annuity(periodRate, remaining - 1)).
+// With no rate change inside the period it is exactly PMT(periodRate, remaining, -balance). Same
+// re-sizing rule as Rate Revision — Structured uses at a revision.
+function resizedInstallment(balance, interest, periodRate, remaining) {
+  const k = remaining - 1;
+  const annuity = k <= 0 ? 0 : (periodRate === 0 ? k : (1 - Math.pow(1 + periodRate, -k)) / periodRate);
+  return (balance + interest) / (1 + annuity);
+}
+
 export function PMT(rate, nper, pv, fv = 0, type = 0) {
   if (rate === 0) return -(pv + fv) / nper;
   const pvif = Math.pow(1 + rate, nper);
@@ -106,6 +161,11 @@ export function buildStructuredSchedule(p) {
   const ratePerPeriod = ratePerYear / ppy;
   const monthlyRate = ratePerYear / 12;
   const monthlyCof = cofRate / 12;
+  const rb = rateBook(p);
+  const step = (ppy === 12) ? 1 : 3;
+  // Interest on `bal` for months a..b. Layered: each month at its own rate. Otherwise the
+  // original nominal expression for that period length, untouched.
+  const periodInt = (bal, a, b, legacy) => (rb.layered ? bal * rb.factor(a, b) : legacy);
 
   const rows = [];
   let urpa = loanAmount;
@@ -115,7 +175,7 @@ export function buildStructuredSchedule(p) {
   // Moratorium accrual
   let accruedReceivable = 0;
   for (let m = 1; m <= moratoriumMonths; m++) {
-    const interest = urpa * monthlyRate;
+    const interest = periodInt(urpa, m, m, urpa * monthlyRate);
     let installment = 0;
     accruedReceivable += interest;
     if (capFlags[m - 1]) {
@@ -138,16 +198,26 @@ export function buildStructuredSchedule(p) {
   // installments below amortise this amount; funded-security sizing uses it too.
   const capitalizedPrincipal = urpa;
 
+  // COF per row: the month's own layer (1% flat in Refinance months). Row i is month i.
+  const cofForRow = rb.layered ? (i) => rb.cof(i) / 12 : null;
+  const finish = (out) => {
+    applyIntExpenseAccrual(rows, monthlyCof, cofForRow);
+    if (rb.layered) rows.forEach((r) => { if (r.sl > 0) { r.rate = rb.rate(r.sl); r.cof = rb.cof(r.sl); } });
+    return out;
+  };
+
   // Regular installments
   if (regularPeriods <= 0) {
-    applyIntExpenseAccrual(rows, monthlyCof);
-    return { rows, accruedReceivable, capitalizedPrincipal };
+    return finish({ rows, accruedReceivable, capitalizedPrincipal });
   }
 
   // Compute the "base" regular installment without accrued-receivable add-on (used as the EMI/installment-size for security calc)
   let baseInstallment = 0;
   if (paymentMode === 'EMI' || paymentMode === 'EQI') {
-    const pmt = PMT(ratePerPeriod, regularPeriods, -urpa);
+    // Sized at the rate in force when repayment starts. A later rate layer re-sizes it on the
+    // payment that first feels the new rate, so the loan still clears exactly at maturity.
+    let sizedRate = rb.rate(moratoriumMonths + 1);
+    let pmt = PMT(sizedRate / ppy, regularPeriods, -urpa);
     baseInstallment = pmt;
     let paymentCounter = 0;
     for (let m = moratoriumMonths + 1; m <= tenorMonths; m++) {
@@ -155,7 +225,11 @@ export function buildStructuredSchedule(p) {
       const monthsSinceMora = m - moratoriumMonths;
       const isPaymentMonth = (ppy === 12) || (monthsSinceMora % 3 === 0);
       if (isPaymentMonth) {
-        interest = urpa * ratePerPeriod;
+        interest = periodInt(urpa, m - step + 1, m, urpa * ratePerPeriod);
+        if (rb.layered && (rb.rate(m) !== sizedRate || !rb.uniform(m - step + 1, m))) {
+          sizedRate = rb.rate(m);
+          pmt = resizedInstallment(urpa, interest, sizedRate / ppy, regularPeriods - paymentCounter);
+        }
         installment = pmt;
         if (paymentCounter === regularPeriods - 1) {
           principal = urpa;
@@ -173,7 +247,7 @@ export function buildStructuredSchedule(p) {
       } else if (stubMonths > 0 && m === tenorMonths) {
         // Maturity stub: pay the leftover principal + the interest accrued on it since the
         // last quarterly due date (+ any still-uncollected moratorium accrued).
-        interest = urpa * monthlyRate * stubMonths;
+        interest = periodInt(urpa, m - stubMonths + 1, m, urpa * monthlyRate * stubMonths);
         principal = urpa;
         installment = principal + interest + accruedReceivable;
         accruedReceivable = 0;
@@ -191,14 +265,14 @@ export function buildStructuredSchedule(p) {
     const principalPer = urpa / regularPeriods;
     let paymentCounter = 0;
     // Base installment for security size = principal-per + interest on initial URPA at first payment
-    const firstInterest = urpa * ratePerPeriod;
+    const firstInterest = periodInt(urpa, moratoriumMonths + 1, moratoriumMonths + step, urpa * ratePerPeriod);
     baseInstallment = principalPer + firstInterest;
     for (let m = moratoriumMonths + 1; m <= tenorMonths; m++) {
       let installment = 0, interest = 0, principal = 0, stubOut;
       const monthsSinceMora = m - moratoriumMonths;
       const isPaymentMonth = (ppy === 12) || (monthsSinceMora % 3 === 0);
       if (isPaymentMonth) {
-        interest = urpa * ratePerPeriod;
+        interest = periodInt(urpa, m - step + 1, m, urpa * ratePerPeriod);
         principal = principalPer;
         installment = principal + interest;
         if (paymentCounter === regularPeriods - 1) {
@@ -215,7 +289,7 @@ export function buildStructuredSchedule(p) {
       } else if (stubMonths > 0 && m === tenorMonths) {
         // Maturity stub: pay the leftover principal + the interest accrued on it since the
         // last quarterly due date (+ any still-uncollected moratorium accrued).
-        interest = urpa * monthlyRate * stubMonths;
+        interest = periodInt(urpa, m - stubMonths + 1, m, urpa * monthlyRate * stubMonths);
         principal = urpa;
         installment = principal + interest + accruedReceivable;
         accruedReceivable = 0;
@@ -229,8 +303,7 @@ export function buildStructuredSchedule(p) {
       });
     }
   }
-  applyIntExpenseAccrual(rows, monthlyCof);
-  return { rows, accruedReceivable, baseInstallment, capitalizedPrincipal };
+  return finish({ rows, accruedReceivable, baseInstallment, capitalizedPrincipal });
 }
 
 // Customized Loan
@@ -247,6 +320,8 @@ export function buildCustomizedSchedule(p) {
 
   const monthlyRate = ratePerYear / 12;
   const monthlyCof = cofRate / 12;
+  const rb = rateBook(p);
+  const periodInt = (bal, a, b, legacy) => (rb.layered ? bal * rb.factor(a, b) : legacy);
 
   const rows = [];
   let urpa = loanAmount;
@@ -254,7 +329,7 @@ export function buildCustomizedSchedule(p) {
 
   let accruedReceivable = 0;
   for (let m = 1; m <= moratoriumMonths; m++) {
-    const interest = urpa * monthlyRate;
+    const interest = periodInt(urpa, m, m, urpa * monthlyRate);
     let installment = 0;
     accruedReceivable += interest;
     if (capFlags[m - 1]) {
@@ -309,7 +384,7 @@ export function buildCustomizedSchedule(p) {
         gridDates.filter(d => d >= m).length + (gridDates.includes(m) ? 0 : 1);
       let prevInt = from - 1;
       for (let m = from; m <= to; m++) {
-        const interest = urpa * monthlyRate;
+        const interest = periodInt(urpa, m, m, urpa * monthlyRate);
         accruedReceivable += interest;
         const prin = isPrincipalMonth(m);
         // A principal month always settles its interest; otherwise the grid decides, and
@@ -367,20 +442,23 @@ export function buildCustomizedSchedule(p) {
       epiConstPrincipal = layerStartBalance / periodsToMaturity;
     }
 
+    // Rate in force when this layer starts — the Offered Rate unless rate layers are in use.
+    const layerRate = rb.rate(from);
+    let sizedRate = layerRate;
     if (L.paymentType === 'EMI' || L.paymentType === 'EQI') {
       // Size the annuity over the periods remaining to MATURITY (not just this layer's span),
       // so a layer that ends before maturity only partially amortises and leaves a balance for
       // the next layer (matching the Equal-Principal layer behaviour). Leftover months round
       // the period count UP — see periodsToCover.
-      pmt = PMT(ratePerYear * ppm / 12, periodsToCover(from, tenorMonths, ppm), -urpa);
+      pmt = PMT(layerRate * ppm / 12, periodsToCover(from, tenorMonths, ppm), -urpa);
       if (!layerInstallments[L.paymentType]) layerInstallments[L.paymentType] = pmt;
     } else if (L.paymentType === 'Equal Principal + Interest (Monthly)' && !layerInstallments['Installment']) {
-      layerInstallments['Installment'] = (urpa / count) + urpa * monthlyRate;
+      layerInstallments['Installment'] = (urpa / count) + urpa * (layerRate / 12);
     } else if (L.paymentType === 'Equal Principal + Interest (Quarterly)' && !layerInstallments['Installment']) {
       const qPeriods = periodsToCover(from, to, 3);
-      layerInstallments['Installment'] = (urpa / qPeriods) + urpa * (ratePerYear / 4);
+      layerInstallments['Installment'] = (urpa / qPeriods) + urpa * (layerRate / 4);
     } else if (L.paymentType && L.paymentType.startsWith('Customized Principal') && !layerInstallments['Customized']) {
-      layerInstallments['Customized'] = (L.customPrincipal || 0) + urpa * monthlyRate;
+      layerInstallments['Customized'] = (L.customPrincipal || 0) + urpa * (layerRate / 12);
     }
 
     let paymentCounter = 0;
@@ -395,9 +473,16 @@ export function buildCustomizedSchedule(p) {
       const elapsed = m - prevPayMonth;
 
       if (isPaymentMonth(m)) {
-        interest = urpa * monthlyRate * elapsed;
+        interest = periodInt(urpa, prevPayMonth + 1, m, urpa * monthlyRate * elapsed);
         if (elapsed !== ppm) stubOut = elapsed; // short final period of the layer
         if (ptype === 'EMI' || ptype === 'EQI') {
+          // A rate layer landing inside this payment layer re-sizes the installment on the
+          // first payment that feels it, over the periods still left to maturity.
+          if (rb.layered && (rb.rate(m) !== sizedRate || !rb.uniform(prevPayMonth + 1, m))) {
+            sizedRate = rb.rate(m);
+            pmt = resizedInstallment(urpa, interest, sizedRate * ppm / 12,
+              periodsToCover(prevPayMonth + 1, tenorMonths, ppm));
+          }
           installment = pmt;
           principal = installment - interest;
         } else if (ptype.startsWith('Equal Principal + Interest')) {
@@ -434,7 +519,8 @@ export function buildCustomizedSchedule(p) {
       if (installment > 0) paymentCounter++;
     }
   }
-  applyIntExpenseAccrual(rows, monthlyCof);
+  applyIntExpenseAccrual(rows, monthlyCof, rb.layered ? (i) => rb.cof(i) / 12 : null);
+  if (rb.layered) rows.forEach((r) => { if (r.sl > 0) { r.rate = rb.rate(r.sl); r.cof = rb.cof(r.sl); } });
   return { rows, accruedReceivable, layerInstallments, capitalizedPrincipal };
 }
 
@@ -479,6 +565,7 @@ export function buildSplitSchedule(p) {
 
   const monthlyRate = ratePerYear / 12;
   const monthlyCof = cofRate / 12;
+  const rb = rateBook(p);
   const pMonths = principalPaymentMonths(principalStartMonth, tenorMonths, principalPeriod);
   const pSet = new Set(pMonths);
 
@@ -489,7 +576,7 @@ export function buildSplitSchedule(p) {
 
   for (let m = 1; m <= tenorMonths; m++) {
     // Interest first, then principal — so the month's interest is always on the opening balance.
-    const interest = urpa * monthlyRate;
+    const interest = rb.layered ? urpa * rb.factor(m, m) : urpa * monthlyRate;
     accruedReceivable += interest;
     const flag = pSet.has(m) ? 'paid'
       : (intFlags[m - 1] || defaultIntFlag(m, interestPeriod, pSet, tenorMonths));
@@ -527,7 +614,8 @@ export function buildSplitSchedule(p) {
     });
   }
 
-  applyIntExpenseAccrual(rows, monthlyCof);
+  applyIntExpenseAccrual(rows, monthlyCof, rb.layered ? (i) => rb.cof(i) / 12 : null);
+  if (rb.layered) rows.forEach((r) => { if (r.sl > 0) { r.rate = rb.rate(r.sl); r.cof = rb.cof(r.sl); } });
   return { rows, accruedReceivable, capitalizedPrincipal: loanAmount, principalMonths: pMonths };
 }
 
@@ -535,7 +623,7 @@ export function buildSplitSchedule(p) {
 // Metrics — keep only what's needed; surface ERR primarily, plus NIM% and NII$
 // ============================================================
 export function computeMetrics(schedule, params) {
-  const { loanAmount, ratePerYear, cofRate = 0, paymentMode, securityKind, numInst = 0,
+  const { loanAmount, cofRate = 0, paymentMode, securityKind, numInst = 0,
           tenorMonths = 0, moratoriumMonths = 0 } = params;
   let securityAmount = params.securityAmount || 0;
   let securityRate = params.securityRate || 0;
@@ -552,13 +640,16 @@ export function computeMetrics(schedule, params) {
   // When moratorium interest is capitalized the post-moratorium principal is larger,
   // so the funded-security installment is sized on that (grown) principal.
   const basePrincipal = schedule.capitalizedPrincipal || loanAmount;
+  // With rate layers the installment is sized at the rate in force when repayment starts.
+  const rb = rateBook(params);
+  const sizingRate = rb.rate(moratoriumMonths + 1);
   if (kind.startsWith('EMI') || kind.startsWith('EQI') || kind === 'Installment') {
     let unitInstallment = 0;
     if (kind.startsWith('EMI')) {
-      unitInstallment = regularMonths > 0 ? PMT(ratePerYear / 12, regularMonths, -basePrincipal) : 0;
+      unitInstallment = regularMonths > 0 ? PMT(sizingRate / 12, regularMonths, -basePrincipal) : 0;
     } else if (kind.startsWith('EQI')) {
       const q = Math.max(1, Math.round(regularMonths / 3));
-      unitInstallment = PMT(ratePerYear / 4, q, -basePrincipal);
+      unitInstallment = PMT(sizingRate / 4, q, -basePrincipal);
     } else if (schedule.baseInstallment) {
       // Structured Equal-Principal: first installment size
       unitInstallment = schedule.baseInstallment;
@@ -578,6 +669,7 @@ export function computeMetrics(schedule, params) {
   const totalMonths = rows.length - 1;
   const tenorYears = totalMonths / 12;
 
+  // Always at the form's Total COF — Refinance months do not change the security benefit.
   const csBenefit = (cofRate - securityRate) * (securityAmount || 0) * tenorYears;
   const netInterestExpense = totalInterestExpense - csBenefit;
 
@@ -585,13 +677,20 @@ export function computeMetrics(schedule, params) {
   const nii = totalInterest + csBenefit - totalInterestExpense;
   const nim = avgPortfolio > 0 && tenorYears > 0 ? (nii / avgPortfolio) / tenorYears : 0;
 
-  // ERR — match Excel I4 = E6 + I3 = COF + NIM. Internally computed.
-  const effectiveRate = cofRate + nim;
+  // ERR — match Excel I4 = E6 + I3 = COF + NIM. When rate layers put some months on the 1%
+  // Refinance COF, the COF term is the EFFECTIVE COF actually paid (interest expense / average
+  // portfolio / years), as Rate Revision does. With one COF throughout the two are identical,
+  // so the flat figure is kept there and no existing result moves.
+  const effectiveCof = rb.layered
+    ? (avgPortfolio > 0 && tenorYears > 0 ? (totalInterestExpense / avgPortfolio) / tenorYears : 0)
+    : cofRate;
+  const effectiveRate = effectiveCof + nim;
 
   return {
     effectiveRate,
     nim,
     nii,
+    effectiveCof,
     // Auxiliary (not displayed, used for context)
     avgPortfolio,
     totalInterest,

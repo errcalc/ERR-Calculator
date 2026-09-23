@@ -746,8 +746,10 @@ select option { color: var(--text); background: var(--bg-elev); }
   border-color: var(--primary);
   box-shadow: var(--focus);
 }
-/* Auto-derived (read-only) layer field — muted but still clearly readable. */
-.layer-row select.readonly-cell {
+/* Auto-derived (read-only) layer field — muted but still clearly readable. Also the locked
+   rate box of a Refinance Rate layer. */
+.layer-row select.readonly-cell,
+.layer-row input.readonly-cell {
   opacity: 1;
   background-color: var(--bg);      /* match the other boxes; muted via text + cursor only */
   color: var(--text-soft);
