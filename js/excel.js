@@ -1,6 +1,6 @@
 // Excel / Word / PDF I/O via CDN libs
-import { formatMoney as fmtM, formatPercent as fmtP, formatRateLayers } from './formatting.js?v=20260923f';
-import { SPLIT_MODE, REFINANCE_RATE, REFINANCE_LENDING_RATE, REFINANCE_COF } from './calculations.js?v=20260923f';
+import { formatMoney as fmtM, formatPercent as fmtP, formatRateLayers } from './formatting.js?v=20260923g';
+import { SPLIT_MODE, REFINANCE_RATE, REFINANCE_LENDING_RATE, REFINANCE_COF } from './calculations.js?v=20260923g';
 
 // Funded Security as it READS on screen. The stored value is always "<kind> after Moratorium",
 // but on a loan with no moratorium the UI shows "<kind> Installment" — the workbook and the PDF
@@ -217,6 +217,7 @@ const STYLE = {
   },
   cellCenter: { alignment: { horizontal: 'center' } },
 };
+const RIGHT = { alignment: { horizontal: 'right' } };
 
 // Rate Revision verification look (matches the rectified file): bigger navy title, green
 // banners/headers with DARK text. Number formats are the plain red-negative variants used on
@@ -246,7 +247,10 @@ function setCell(ws, addr, value, opts = {}) {
       ? { t: 's', v: value }
       : { t: 'n', v: value };
   if (opts.z) cell.z = opts.z;
-  if (opts.s) cell.s = opts.s;
+  // A copy, never the shared STYLE object: the writer folds a cell's number format into its
+  // style, so passing STYLE.cellCenter alongside a percent format turned every later
+  // cellCenter cell into a percentage (Rate_Layers showed layer 2 / month 4 as 200% / 400%).
+  if (opts.s) cell.s = { ...opts.s };
   ws[addr] = cell;
 }
 
@@ -307,8 +311,9 @@ export function downloadVerificationExcel(filename, ctx) {
   const MORA_REF = _idx.moratoriumPeriod ? `${inputsSheet}B${_idx.moratoriumPeriod}` : null;
   // Equal-Principal pages can express principal as a constant formula (Loan / number-of-periods).
   // Only valid on the Structured page where the whole regular tenor is one EPI stream.
-  const epiCapable = pageType === 'regular' && LOAN_REF && TENOR_REF && MORA_REF;
-  const regularMonthsExpr = TENOR_REF && MORA_REF ? `(${TENOR_REF}-${MORA_REF})` : null;
+  // With no moratorium there is no Moratorium Period line, and the regular months are the tenor.
+  const regularMonthsExpr = TENOR_REF ? (MORA_REF ? `(${TENOR_REF}-${MORA_REF})` : TENOR_REF) : null;
+  const epiCapable = pageType === 'regular' && LOAN_REF && regularMonthsExpr;
 
   // Customized Equal-Principal layers: principal is constant within a layer =
   // (layer-start balance) / (periods remaining to MATURITY). The layer-start balance and
@@ -566,13 +571,15 @@ export function downloadVerificationExcel(filename, ctx) {
       || ['loan amount', 'initial loan amount'].some(k => labelLower.includes(k));
     const isInt = ['moratoriumPeriod', 'loanTenor', 'numInst'].includes(tag)
       || ['moratorium period', 'loan tenor', 'number of installments'].some(k => labelLower.includes(k));
+    // Every value right-aligned — text answers (Yes, EMI, FDR) as well as numbers — so the
+    // column reads as one.
     if (typeof value === 'number') {
-      if (isPct) setCell(wsInputs, `B${r}`, value, { z: FMT.PCT2 });
-      else if (isMoney) setCell(wsInputs, `B${r}`, value, { z: FMT.ACCOUNTING });
-      else if (isInt) setCell(wsInputs, `B${r}`, value, { z: FMT.ACCOUNTING_INT });
-      else setCell(wsInputs, `B${r}`, value);
+      if (isPct) setCell(wsInputs, `B${r}`, value, { z: FMT.PCT2, s: RIGHT });
+      else if (isMoney) setCell(wsInputs, `B${r}`, value, { z: FMT.ACCOUNTING, s: RIGHT });
+      else if (isInt) setCell(wsInputs, `B${r}`, value, { z: FMT.ACCOUNTING_INT, s: RIGHT });
+      else setCell(wsInputs, `B${r}`, value, { s: RIGHT });
     } else {
-      setCell(wsInputs, `B${r}`, String(value || ''), { text: true });
+      setCell(wsInputs, `B${r}`, String(value || ''), { text: true, s: RIGHT });
     }
   });
 
@@ -582,13 +589,13 @@ export function downloadVerificationExcel(filename, ctx) {
   if (idx.csAmount && (secKind.startsWith('EMI') || secKind.startsWith('EQI'))) {
     if (capitalize) {
       // Sized on the capitalized (grown) principal — write the derived amount directly.
-      setCell(wsInputs, `B${idx.csAmount}`, num(metrics.derivedSecurityAmount || 0), { z: FMT.ACCOUNTING });
-    } else if (SIZE_RATE_REF && LOAN_REF && TENOR_REF && MORA_REF) {
+      setCell(wsInputs, `B${idx.csAmount}`, num(metrics.derivedSecurityAmount || 0), { z: FMT.ACCOUNTING, s: RIGHT });
+    } else if (SIZE_RATE_REF && LOAN_REF && regularMonthsExpr) {
       const nMul = idx.numInst ? `*B${idx.numInst}` : '';
       const pmt = secKind.startsWith('EQI')
-        ? `PMT(${SIZE_RATE_REF}/4,(${TENOR_REF}-${MORA_REF})/3,-${LOAN_REF},,0)`
-        : `PMT(${SIZE_RATE_REF}/12,${TENOR_REF}-${MORA_REF},-${LOAN_REF},,0)`;
-      setCell(wsInputs, `B${idx.csAmount}`, 0, { f: `${pmt}${nMul}`, z: FMT.ACCOUNTING });
+        ? `PMT(${SIZE_RATE_REF}/4,${regularMonthsExpr}/3,-${LOAN_REF},,0)`
+        : `PMT(${SIZE_RATE_REF}/12,${regularMonthsExpr},-${LOAN_REF},,0)`;
+      setCell(wsInputs, `B${idx.csAmount}`, 0, { f: `${pmt}${nMul}`, z: FMT.ACCOUNTING, s: RIGHT });
     }
   }
 
@@ -1234,14 +1241,25 @@ function collectInputLinesFor(pageType, inp) {
   const rateLine = inp.rateLayered
     ? ['Interest Rate Layers', (inp.intRateLayers || []).length + ' layer(s)']
     : ['Offered Rate', inp.offeredRate ?? 0, 'offeredRate'];
+  // Only the lines the RM actually filled in: no Moratorium Period without a moratorium, no
+  // instalment count for a cash-backed security, and no security lines without a security.
+  const hasMora = inp.moratoriumAvail === 'Yes' || inp.moratoriumAvail === true;
+  const moraLines = [
+    ['Moratorium Available?', yesNo(inp.moratoriumAvail)],
+    ...(hasMora ? [['Moratorium Period (Months)', inp.moratoriumPeriod ?? 0, 'moratoriumPeriod']] : []),
+  ];
   const secType = String(inp.fundedSecurityType || '');
-  const secName = (secType && secType !== 'No Funded Security') ? securityTypeLabel(inp) : 'Funded Security';
+  const hasSecurity = !!secType && secType !== 'No Funded Security';
+  const isInstallmentSecurity = /^(EMI|EQI) after Moratorium$/.test(secType) || secType === 'Installment';
+  const secName = securityTypeLabel(inp);
   const securityLines = [
     ['Total COF (COF/ISC + OPEX)', inp.totalCof ?? 0, 'totalCof'],
-    ['Funded Security Type', securityTypeLabel(inp)],
-    ['Number of Installments (security)', inp.numInst ?? 0, 'numInst'],
-    [`${secName} Amount`, securityAmtFor(inp, 'derivedSecurityAmount') ?? (inp.csAmount ?? 0), 'csAmount'],
-    [`${secName} Rate`, inp.csRate ?? 0, 'csRate'],
+    ['Funded Security Type', secType ? secName : ''],
+    ...(isInstallmentSecurity ? [['Number of Installments (security)', inp.numInst ?? 0, 'numInst']] : []),
+    ...(hasSecurity ? [
+      [`${secName} Amount`, securityAmtFor(inp, 'derivedSecurityAmount') ?? (inp.csAmount ?? 0), 'csAmount'],
+      [`${secName} Rate`, inp.csRate ?? 0, 'csRate'],
+    ] : []),
   ];
   if (pageType === 'regular') {
     // The split type carries no moratorium fields — a moratorium is expressed in the interest
@@ -1250,10 +1268,8 @@ function collectInputLinesFor(pageType, inp) {
     return [
       rateLine,
       ['Loan Amount', inp.loanAmount ?? 0, 'loanAmount'],
-      ...(splitLines || [
-      ['Moratorium Available?', yesNo(inp.moratoriumAvail)],
-      ['Moratorium Period (Months)', inp.moratoriumPeriod ?? 0, 'moratoriumPeriod']]),
-      ['Loan Tenor including Moratorium (Months)', inp.loanTenor ?? 0, 'loanTenor'],
+      ...(splitLines || moraLines),
+      [hasMora && !splitLines ? 'Loan Tenor including Moratorium (Months)' : 'Loan Tenor (Months)', inp.loanTenor ?? 0, 'loanTenor'],
       ['Payment Mode', inp.paymentMode ?? ''],
       ...securityLines,
     ];
@@ -1262,9 +1278,8 @@ function collectInputLinesFor(pageType, inp) {
     return [
       rateLine,
       ['Loan Amount', inp.loanAmount ?? 0, 'loanAmount'],
-      ['Moratorium Available?', yesNo(inp.moratoriumAvail)],
-      ['Moratorium Period (Months)', inp.moratoriumPeriod ?? 0, 'moratoriumPeriod'],
-      ['Loan Tenor including Moratorium (Months)', inp.loanTenor ?? 0, 'loanTenor'],
+      ...moraLines,
+      [hasMora ? 'Loan Tenor including Moratorium (Months)' : 'Loan Tenor (Months)', inp.loanTenor ?? 0, 'loanTenor'],
       ['Payment Layers', (inp.paymentLayers || []).length + ' layer(s)'
         + ((inp.paymentLayers || []).filter(L => L.paymentType === SPLIT_MODE)
             .map(L => ` — months ${L.fromInstallment}-${L.toInstallment}: ${L.intFreq} interest / ${L.prinFreq} principal`).join('') || '')],

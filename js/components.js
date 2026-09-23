@@ -1,5 +1,5 @@
 // Reusable UI component builders (returns DOM nodes)
-import { attachCommaFormatter, sanitizeDecimalString, formatTwoDecimalsOnBlur } from './formatting.js?v=20260923f';
+import { attachCommaFormatter, sanitizeDecimalString, formatTwoDecimalsOnBlur } from './formatting.js?v=20260923g';
 
 let uid = 0;
 const nextId = () => `f${++uid}`;
@@ -1226,16 +1226,33 @@ export function monthRateLayersField({ label, name, getTenor, rateTypes, fixedRa
   const tableWrap = el('div', { class: 'sec-table rl-table', 'data-name': name });
   wrapper.appendChild(tableWrap);
 
+  // The layers as they apply to the CURRENT tenor. The last layer always runs to the final
+  // month: a longer tenor extends it, a shorter one ends the layers there. The saved `data` is
+  // never cut, because a tenor is typed one digit at a time — "15" passes through "1", and
+  // trimming on that keystroke would throw the later layers away for good.
+  function fitted() {
+    const tenor = getTenor() || 0;
+    if (!tenor) return data.map((r) => ({ ...r }));
+    const out = [];
+    for (const r of data) {
+      if (r.fromMonth > tenor) break;
+      out.push({ ...r, toMonth: Math.min(r.toMonth, tenor) });
+    }
+    if (out.length) out[out.length - 1].toMonth = tenor;
+    return out;
+  }
+
   function render() {
     tableWrap.innerHTML = '';
-    if (!data.length) {
+    const shown = fitted();
+    if (!shown.length) {
       tableWrap.appendChild(el('div', { class: 'sec-empty help' }, 'No interest rate layers added yet — click Edit to add.'));
       return;
     }
     tableWrap.appendChild(el('div', { class: 'sec-row rl-row sec-head' },
       el('div', { class: 'sec-vals irl-vals' },
         el('div', {}, 'From Month'), el('div', {}, 'To Month'), el('div', {}, 'Rate Type'), el('div', {}, 'Interest Rate'))));
-    data.forEach((r) => {
+    shown.forEach((r) => {
       tableWrap.appendChild(el('div', { class: 'sec-row rl-row' },
         el('div', { class: 'sec-vals irl-vals' },
           el('div', {}, pad(r.fromMonth)),
@@ -1311,12 +1328,10 @@ export function monthRateLayersField({ label, name, getTenor, rateTypes, fixedRa
       rows.push(api);
       entriesWrap.appendChild(rowEl);
     }
-    (data.length ? data : Array.from({ length: minLayers }, () => ({}))).forEach((r) => addRow(r));
+    // The editor opens on the layers as they apply to the current tenor — what the table shows.
+    const shown = fitted();
+    (shown.length ? shown : Array.from({ length: minLayers }, () => ({}))).forEach((r) => addRow(r));
     relink();
-    // Saved layers always end at the final month, so a mismatch here means the tenor changed
-    // since: let the last layer follow it (a shrink past a layer's start is left for the RM).
-    const lastRow = rows[rows.length - 1];
-    if (lastRow.from && lastRow.from <= tenor) lastRow.to.value = String(tenor);
 
     const addEntry = el('button', { type: 'button', class: 'sec-add-btn sec-add-entry' }, '+ Add another layer');
     addEntry.addEventListener('click', () => {
@@ -1371,9 +1386,12 @@ export function monthRateLayersField({ label, name, getTenor, rateTypes, fixedRa
     const mc = document.getElementById('modal-card'); if (mc) mc.classList.add('modal-card--sec', 'modal-card--irl');
   }
 
-  wrapper.getValue = () => data.map((r) => ({ ...r }));
-  // Drafts may hold layers from before a tenor change; they are kept as saved and flagged by the
-  // page's validation, and opening Edit re-fits the last layer to the new final month.
+  // getValue: the layers fitted to the current tenor — what the engine and exports use.
+  // getSaved: the layers exactly as last saved — what a draft keeps, so a tenor briefly typed
+  // short does not cost the RM their later layers.
+  wrapper.getValue = () => fitted();
+  wrapper.getSaved = () => data.map((r) => ({ ...r }));
+  wrapper.refresh = () => render();
   wrapper.setValue = (arr) => {
     data = (arr || [])
       .filter((r) => r && r.fromMonth && r.toMonth && rateTypes.includes(r.rateType)

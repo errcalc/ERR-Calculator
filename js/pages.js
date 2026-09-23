@@ -3,23 +3,23 @@ import {
   el, numberField, percentField, optionField, dateField, textField,
   monthBoxesField, layeredField, securityLayersField, rateLayersField, monthRateLayersField, toast, parseDDMMMYYYY, formatDDMMMYYYY,
   openModal, closeModal,
-} from './components.js?v=20260923f';
-import { isoToDDMMMYYYY } from './formatting.js?v=20260923f';
+} from './components.js?v=20260923g';
+import { isoToDDMMMYYYY } from './formatting.js?v=20260923g';
 import {
   buildStructuredSchedule, buildCustomizedSchedule,
   buildRateRevisionStructured, computeMetrics,
   buildSplitSchedule, principalPaymentMonths, SPLIT_MODE, FREQ, FREQ_NAMES,
   computeRevisionMetrics, computeRevisionCustomizedMetrics, buildCofData,
   addMonthsDue, COMMERCIAL_RATE, REFINANCE_RATE, REFINANCE_LENDING_RATE,
-} from './calculations.js?v=20260923f';
-import { formatMoney, formatPercent, formatNumber, formatRateLayers } from './formatting.js?v=20260923f';
-import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20260923f';
+} from './calculations.js?v=20260923g';
+import { formatMoney, formatPercent, formatNumber, formatRateLayers } from './formatting.js?v=20260923g';
+import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20260923g';
 import {
   downloadScheduleAsExcel, downloadSampleAmortization, readUploadedSchedule,
   downloadScheduleAsWord, downloadScheduleAsPDF, downloadVerificationExcel, downloadReportPDF,
   downloadCofSample, readUploadedCof,
   downloadCustomizedRevisionSample, readCustomizedRevisionFile,
-} from './excel.js?v=20260923f';
+} from './excel.js?v=20260923g';
 
 // Cached page state by tab key (also persisted via storage saveDraft)
 const tabState = {};
@@ -193,7 +193,8 @@ export function renderRegularLoan(root, pre = null) {
   // single Offered Rate box.
   const layeredRates = !!(pre && pre.rateLayers === 'Yes');
   const intRateLayers = layeredRates ? interestRateLayersField(() => loanTenor.getValue()) : null;
-  loanTenor.input.addEventListener('input', () => refresh());
+  // The rate layers' last layer follows the tenor, so their table redraws with it.
+  loanTenor.input.addEventListener('input', () => { if (intRateLayers) intRateLayers.refresh(); refresh(); });
   const paymentMode = optionField({
     label: 'Payment Mode', name: 'paymentMode',
     options: [{ label: 'select', value: '' }, 'EMI', 'EQI', 'Equal Principal + Interest (Monthly)', 'Equal Principal + Interest (Quarterly)', SPLIT_MODE],
@@ -453,6 +454,7 @@ function collectRegularInputs(f) {
     offeredRate: f.offeredRate.getValue(),
     rateLayered: !!f.intRateLayers,
     intRateLayers: f.intRateLayers ? f.intRateLayers.getValue() : [],
+    intRateLayersSaved: f.intRateLayers ? f.intRateLayers.getSaved() : [],
     loanAmount: f.loanAmount.getValue(),
     moratoriumAvail: f.moratoriumAvail.getValue(),
     moratoriumPeriod: f.moratoriumPeriod.getValue() || 0,
@@ -543,7 +545,10 @@ export function renderCustomizedLoan(root, pre = null) {
   const loanTenor = numberField({ label: 'Loan Tenor (Months)', name: 'loanTenor', integerOnly: true, min: 1 });
   const layeredRates = !!(pre && pre.rateLayers === 'Yes');
   const intRateLayers = layeredRates ? interestRateLayersField(() => loanTenor.getValue()) : null;
-  loanTenor.input.addEventListener('input', () => { refreshLayerOpts(); refresh(); paymentLayers.applyLayerRules(); refreshSplitGrid(); });
+  loanTenor.input.addEventListener('input', () => {
+    if (intRateLayers) intRateLayers.refresh();
+    refreshLayerOpts(); refresh(); paymentLayers.applyLayerRules(); refreshSplitGrid();
+  });
 
   function fromOptions() {
     const tenor = loanTenor.getValue() || 0;
@@ -796,6 +801,7 @@ function collectCustomizedInputs(f) {
     offeredRate: f.offeredRate.getValue(),
     rateLayered: !!f.intRateLayers,
     intRateLayers: f.intRateLayers ? f.intRateLayers.getValue() : [],
+    intRateLayersSaved: f.intRateLayers ? f.intRateLayers.getSaved() : [],
     loanAmount: f.loanAmount.getValue(),
     moratoriumAvail: f.moratoriumAvail.getValue(),
     moratoriumPeriod: f.moratoriumPeriod.getValue() || 0,
@@ -1477,12 +1483,17 @@ function renderResults(panel, ctx) {
   // Optional user reference is prefixed to every file name (sanitized of OS-illegal chars).
   const refRaw = (ctx.inputs && ctx.inputs.reference) ? String(ctx.inputs.reference) : '';
   const refPrefix = refRaw.replace(/[\\/:*?"<>|]+/g, '').trim();
-  const baseFname = (refPrefix ? refPrefix + '_' : '') +
-    ctx.pageTitle.replace(/[^a-z0-9]+/gi, '_') + '_' + new Date().toISOString().slice(0, 10);
+  // Stamped at the CLICK, in local time (YYYY-MM-DD_HHMMSS), so two downloads a minute apart
+  // never collide and an early-morning file is not dated the previous (UTC) day.
+  const baseFname = () => {
+    const d = new Date(), p2 = (n) => String(n).padStart(2, '0');
+    const stamp = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
+    return (refPrefix ? refPrefix + '_' : '') + ctx.pageTitle.replace(/[^a-z0-9]+/gi, '_') + '_' + stamp;
+  };
   const reportBtn = el('button', { class: 'secondary-btn', type: 'button' }, '📄 Download Report');
   const verifyBtn = el('button', { class: 'verify-btn', type: 'button' }, 'Verify Calculation');
-  reportBtn.addEventListener('click', () => downloadReportPDF(baseFname + '_Report.pdf', ctx));
-  verifyBtn.addEventListener('click', () => downloadVerificationExcel(baseFname + '_Verification.xlsx', ctx));
+  reportBtn.addEventListener('click', () => downloadReportPDF(baseFname() + '_Report.pdf', ctx));
+  verifyBtn.addEventListener('click', () => downloadVerificationExcel(baseFname() + '_Verification.xlsx', ctx));
   card.appendChild(el('div', { class: 'results-actions' }, reportBtn, verifyBtn));
 
   panel.appendChild(card);
@@ -1546,9 +1557,9 @@ function renderResults(panel, ctx) {
     el('div', { class: 'download-buttons' }, dlExcel, dlWord, dlPdf),
   );
   tableCard.appendChild(dlBar);
-  dlExcel.addEventListener('click', () => downloadScheduleAsExcel(baseFname + '.xlsx', ctx.schedule, meta));
-  dlWord.addEventListener('click', () => downloadScheduleAsWord(baseFname + '.docx', ctx.schedule, meta));
-  dlPdf.addEventListener('click', () => downloadScheduleAsPDF(baseFname + '.pdf', ctx.schedule, meta));
+  dlExcel.addEventListener('click', () => downloadScheduleAsExcel(baseFname() + '.xlsx', ctx.schedule, meta));
+  dlWord.addEventListener('click', () => downloadScheduleAsWord(baseFname() + '.docx', ctx.schedule, meta));
+  dlPdf.addEventListener('click', () => downloadScheduleAsPDF(baseFname() + '.pdf', ctx.schedule, meta));
 
   panel.appendChild(tableCard);
 }
@@ -1633,7 +1644,8 @@ function restoreDraft(tabKey, fields) {
         customPrincipal: L.customPrincipal,
       })));
     }
-    if (fields.intRateLayers && Array.isArray(data.intRateLayers)) fields.intRateLayers.setValue(data.intRateLayers);
+    // The layers as last saved (older drafts only carry the fitted copy).
+    if (fields.intRateLayers) fields.intRateLayers.setValue(data.intRateLayersSaved || data.intRateLayers || []);
     if (fields.rateLayers && Array.isArray(data.rateLayers) && data.rateLayers.length) {
       fields.rateLayers.setValue(data.rateLayers.map(L => ({
         fromDate: isoToDDMMMYYYY(L.fromDate),

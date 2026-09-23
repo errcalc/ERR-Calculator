@@ -1,6 +1,6 @@
 // Per-module user guide — opened from the info button in the header. Plain, simple language
 // (explained as if to a 10-year-old). Sections are collapsed by default; click to expand.
-import { el, openModal, closeModal } from './components.js?v=20260923f';
+import { el, openModal, closeModal } from './components.js?v=20260923g';
 
 // ---- Shared sections reused across modules ----
 const MODALITY_BULLETS = [
@@ -63,7 +63,7 @@ const RATE_LAYERS_SECTION = {
     'Enter the Loan Tenor first — the layers are counted in its months.',
     'Rows are counted in the loan’s own months. The first row always starts at Month 01, and each next row starts the month after the one before it ends — you only pick where each row ends (To Month). “+ Add another layer” works once the last row ends before the final month.',
     'The rate can change inside the moratorium too, because the months are the whole loan’s months, not the months after the rest period.',
-    'The last row must end at the loan’s final month. If you change the tenor afterwards, the results ask you to open Edit again — the last row then fits itself to the new final month.',
+    'The last row must end at the loan’s final month. Change the tenor afterwards and the last layer follows it by itself — a longer tenor stretches it, a shorter one ends the layers at the new final month. Lengthen the tenor again and the layers you saved come back.',
     'Rate Type — Commercial Rate: you type the rate. Refinance Rate: the rate is fixed at 5.00% and its box locks. Switch back to Commercial and whatever you had typed returns.',
     'In Refinance months the bank’s cost of fund is 1% flat instead of the Total Cost of Fund you typed. Commercial months keep the Total Cost of Fund. The Loan Security Benefit always uses the Total Cost of Fund.',
     'EMI and EQI are worked out again from the first payment that feels a new rate, so the loan still finishes at exactly zero. If a rate changes in the middle of a quarter, that quarter’s interest is split month by month.',
