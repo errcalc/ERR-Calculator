@@ -1,6 +1,6 @@
 // Excel / Word / PDF I/O via CDN libs
-import { formatMoney as fmtM, formatPercent as fmtP, formatRateLayers } from './formatting.js?v=20260923g';
-import { SPLIT_MODE, REFINANCE_RATE, REFINANCE_LENDING_RATE, REFINANCE_COF } from './calculations.js?v=20260923g';
+import { formatMoney as fmtM, formatPercent as fmtP, formatRateLayers } from './formatting.js?v=20260923h';
+import { SPLIT_MODE, REFINANCE_RATE, REFINANCE_LENDING_RATE, REFINANCE_COF } from './calculations.js?v=20260923h';
 
 // Funded Security as it READS on screen. The stored value is always "<kind> after Moratorium",
 // but on a loan with no moratorium the UI shows "<kind> Installment" — the workbook and the PDF
@@ -19,15 +19,14 @@ function isSplitCtx(inp) {
       || inp.paymentModality === SPLIT_MODE
       || (Array.isArray(inp.paymentLayers) && inp.paymentLayers.some(L => L.paymentType === SPLIT_MODE));
 }
-// The frequency/basis lines that replace the moratorium lines for this type. On Customized the
-// settings live per layer, so they are summarised in the Payment Layers line instead.
+// The frequency/basis lines this type adds after the payment mode (both frequencies count from
+// the moratorium's end). On Customized they live per layer, in the Payment Layers line instead.
 function splitInputLines(inp, prefix) {
   const iF = inp[prefix + 'IntFreq'] || inp.intFreq, pF = inp[prefix + 'PrinFreq'] || inp.prinFreq;
-  const st = inp[prefix + 'PrinStart'] || inp.prinStart, bs = inp[prefix + 'PrinBasis'] || inp.prinBasis;
+  const bs = inp[prefix + 'PrinBasis'] || inp.prinBasis;
   return [
     ['Interest Payment Frequency', iF || ''],
     ['Principal Payment Frequency', pF || ''],
-    ['Principal Payments Start From Month', st || 1],
     ['Principal Amount', bs || ''],
   ];
 }
@@ -752,12 +751,27 @@ function downloadRevisionStructuredVerify(filename, ctx) {
   const secAmtCell = (d) => { const n = secActive(d); return n ? `${LAYER}!$K$${3 + n - 1}` : null; };
   const secRateCell = (d) => { const n = secActive(d); return n ? `${LAYER}!$L$${3 + n - 1}` : null; };
 
-  // The split modality has no moratorium, so its own four settings take those two rows' place
-  // on the Inputs sheet. That makes the list length vary, so the tenor cell the Schedule
-  // formulas quote is derived from it rather than hardcoded — values sit in column D from
-  // row 5, and the tenor is always the last input row.
+  // The Inputs list varies in length (a Moratorium Period line only with a moratorium, three
+  // settings for the split modality), so it is built here, before the Schedule, and every
+  // formula finds the tenor through it — values sit in column D from row 5, and the tenor is
+  // always the last input row.
   const rrSplit = inputs.paymentModality === SPLIT_MODE;
-  const TENOR_CELL = `'Inputs & Results'!$D$${5 + (rrSplit ? 8 : 6) - 1}`;
+  const moraYes = (inputs.moratoriumAvail === 'Yes' || inputs.moratoriumAvail === true);
+  const inputRows = [
+    ['Initial Loan Amount', inputs.initialAmount ?? 0, 'num'],
+    ['Disbursement Date', inputs.disbursementDate ?? '', 'date'],
+    ['Moratorium Given at Disbursement?', moraYes ? 'Yes' : 'No', 'text'],
+    ...(moraYes ? [['Moratorium Period (Months)', inputs.moratoriumPeriod ?? 0, 'int']] : []),
+    [moraYes ? 'Payment Modality after Moratorium Period' : 'Payment Modality', inputs.paymentModality ?? '', 'text'],
+    ...(rrSplit ? [
+      ['Interest Payment Frequency', inputs.rrIntFreq ?? '', 'text'],
+      ['Principal Payment Frequency', inputs.rrPrinFreq ?? '', 'text'],
+      ['Principal Amount', inputs.rrPrinBasis ?? '', 'text'],
+    ] : []),
+    [moraYes ? 'Loan Tenor including Moratorium at Disbursement (Months)' : 'Loan Tenor at Disbursement (Months)', inputs.tenorMonths ?? 0, 'int'],
+  ];
+  const TENOR_ROW = 5 + inputRows.length - 1;
+  const TENOR_CELL = `'Inputs & Results'!$D$${TENOR_ROW}`;
 
   // ----- Schedule sheet -----
   const heads = ['Sl.', 'Date', 'Installment', 'Interest', 'Principal', 'URPA',
@@ -1011,24 +1025,7 @@ function downloadRevisionStructuredVerify(filename, ctx) {
   setCell(wsI, 'D4', 'Values', { text: true, s: RR_STYLE.banner });
   setCell(wsI, 'F4', 'Results', { text: true, s: RR_STYLE.banner });
 
-  const moraYes = (inputs.moratoriumAvail === 'Yes' || inputs.moratoriumAvail === true);
-  // 6 inputs (the Lending Rate / Loan Security / COF layer summaries now live on their own sheet)
-  const inputRows = [
-    ['Initial Loan Amount', inputs.initialAmount ?? 0, 'num'],
-    ['Disbursement Date', inputs.disbursementDate ?? '', 'date'],
-    ...(rrSplit ? [
-      ['Interest Payment Frequency', inputs.rrIntFreq ?? '', 'text'],
-      ['Principal Payment Frequency', inputs.rrPrinFreq ?? '', 'text'],
-      ['Principal Payments Start From Month', inputs.rrPrinStart ?? 1, 'int'],
-      ['Principal Amount', inputs.rrPrinBasis ?? '', 'text'],
-    ] : [
-      ['Moratorium Given at Disbursement?', moraYes ? 'Yes' : 'No', 'text'],
-      ['Moratorium Period (Months)', inputs.moratoriumPeriod ?? 0, 'int'],
-    ]),
-    [moraYes ? 'Payment Modality after Moratorium Period' : 'Payment Modality', inputs.paymentModality ?? '', 'text'],
-    ['Loan Tenor including Moratorium at Disbursement (Months)', inputs.tenorMonths ?? 0, 'int'],
-  ];
-
+  // The input lines themselves are built above, with the Schedule's tenor reference.
   inputRows.forEach(([label, value, kind], i) => {
     const r = 5 + i;
     setCell(wsI, `A${r}`, label, { text: true, s: RR_STYLE.cell });
@@ -1044,15 +1041,18 @@ function downloadRevisionStructuredVerify(filename, ctx) {
     }
   });
 
-  // Results occupy F5:H11 — fixed cells, so the formulas can reference them (and D10 tenor) directly.
+  // Results occupy F5:H11 — fixed cells, so the formulas can reference them directly. The tenor
+  // is the last input row, found through TENOR_ROW (it was hardcoded as D10, which pointed at
+  // the wrong line whenever the input list was not exactly six lines long).
+  const T = `D${TENOR_ROW}`;
   const RES = [
     ['Total Interest Received', `Schedule!D${totalRow}`, RR_FMT.NUM2],
     ['Total Interest Expense', `Schedule!H${totalRow}`, RR_FMT.NUM2],
     ['Loan Security Benefit', `Schedule!K${totalRow}`, RR_FMT.NUM2],
     ['Net Interest Income', `H5+H7-H6`, RR_FMT.NUM2],
     ['Avg Portfolio', `AVERAGE(Schedule!F2:F${lastDataRow - 1})`, RR_FMT.NUM2],
-    ['NIM', `IF(H9*(D10/12)=0,0,H8/H9/(D10/12))`, RR_FMT.PCT4],
-    ['Effective Rate (ERR)', `H10+(H6/H9/D10*12)`, RR_FMT.PCT4],
+    ['NIM', `IF(H9*(${T}/12)=0,0,H8/H9/(${T}/12))`, RR_FMT.PCT4],
+    ['Effective Rate (ERR)', `H10+(H6/H9/${T}*12)`, RR_FMT.PCT4],
   ];
   RES.forEach(([label, f, z], i) => {
     const r = 5 + i;
@@ -1262,15 +1262,13 @@ function collectInputLinesFor(pageType, inp) {
     ] : []),
   ];
   if (pageType === 'regular') {
-    // The split type carries no moratorium fields — a moratorium is expressed in the interest
-    // grid plus a later principal start, so those two lines are replaced by its own settings.
-    const splitLines = isSplitCtx(inp) ? splitInputLines(inp, '') : null;
     return [
       rateLine,
       ['Loan Amount', inp.loanAmount ?? 0, 'loanAmount'],
-      ...(splitLines || moraLines),
-      [hasMora && !splitLines ? 'Loan Tenor including Moratorium (Months)' : 'Loan Tenor (Months)', inp.loanTenor ?? 0, 'loanTenor'],
+      ...moraLines,
+      [hasMora ? 'Loan Tenor including Moratorium (Months)' : 'Loan Tenor (Months)', inp.loanTenor ?? 0, 'loanTenor'],
       ['Payment Mode', inp.paymentMode ?? ''],
+      ...(isSplitCtx(inp) ? splitInputLines(inp, '') : []),
       ...securityLines,
     ];
   }
@@ -1297,11 +1295,11 @@ function collectInputLinesFor(pageType, inp) {
     return [
       ['Initial Loan Amount', inp.initialAmount ?? 0],
       ['Disbursement Date', inp.disbursementDate ?? ''],
-      ...(isSplitCtx(inp) ? splitInputLines(inp, 'rr') : [
       ['Moratorium Given at Disbursement?', yesNo(inp.moratoriumAvail)],
-      ['Moratorium Period (Months)', inp.moratoriumPeriod ?? 0]]),
+      ...(moraYes ? [['Moratorium Period (Months)', inp.moratoriumPeriod ?? 0]] : []),
       [moraYes ? 'Payment Modality after Moratorium Period' : 'Payment Modality', inp.paymentModality ?? ''],
-      ['Loan Tenor including Moratorium at Disbursement (Months)', inp.tenorMonths ?? 0],
+      ...(isSplitCtx(inp) ? splitInputLines(inp, 'rr') : []),
+      [moraYes ? 'Loan Tenor including Moratorium at Disbursement (Months)' : 'Loan Tenor at Disbursement (Months)', inp.tenorMonths ?? 0],
       ['Lending Rate Layers', rateLayersStr],
       ['Loan Security Layers', secLayersStr],
       ['Cost of Fund Layers', (inp.cofRecordCount || 0) + ' record(s)'],

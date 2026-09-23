@@ -315,7 +315,6 @@ export function buildCustomizedSchedule(p) {
     capFlags = [],
     cofRate = 0,
     layers,
-    intFlags = [], // whole-tenor tri-state grid; only split layers read it
   } = p;
 
   const monthlyRate = ratePerYear / 12;
@@ -387,10 +386,9 @@ export function buildCustomizedSchedule(p) {
         const interest = periodInt(urpa, m, m, urpa * monthlyRate);
         accruedReceivable += interest;
         const prin = isPrincipalMonth(m);
-        // A principal month always settles its interest; otherwise the grid decides, and
-        // falls back to the interest frequency.
-        const flag = prin ? 'paid'
-          : (intFlags[m - 1] || (((m - from + 1) % ppmI === 0 || m === to) ? 'paid' : 'accrued'));
+        // A principal month always settles its interest; otherwise the interest frequency
+        // decides, counted from the layer's own start.
+        const flag = (prin || (m - from + 1) % ppmI === 0 || m === to) ? 'paid' : 'accrued';
 
         let installment = 0, principal = 0, stubOut;
         if (flag === 'capitalized') {
@@ -530,8 +528,9 @@ export function buildCustomizedSchedule(p) {
 // The two legs pay on independent calendars. Interest accrues monthly on the outstanding
 // balance; every month is Paid (settle the running accrual in cash), Accrued (carry it to
 // the next Paid month) or Capitalized (fold it into principal at that month's end, so it
-// compounds from there — convention 5). A month carrying a principal payment is always
-// Paid, so the balance can never move inside an unsettled interest stretch.
+// compounds from there — convention 5). Moratorium months are set by their boxes, like every
+// other modality; after the moratorium the two frequencies decide. A month carrying a
+// principal payment is always Paid, so the balance never moves inside an unsettled stretch.
 
 // Principal payment months: counting from `startMonth` as month 1, one on every multiple of
 // `period`, plus maturity — which always settles whatever principal is left.
@@ -544,30 +543,27 @@ export function principalPaymentMonths(startMonth, tenorMonths, period) {
   return out;
 }
 
-// Default interest treatment for a month, before any per-month override from the grid.
-// Principal months are forced Paid; otherwise the frequency decides, counting from month 1.
-function defaultIntFlag(m, interestPeriod, principalSet, tenorMonths) {
-  if (principalSet.has(m) || m === tenorMonths) return 'paid';
-  return (m % interestPeriod === 0) ? 'paid' : 'accrued';
-}
-
 export function buildSplitSchedule(p) {
   const {
     loanAmount, ratePerYear, tenorMonths,
     interestPeriod = 1,        // months per interest period: 1 / 3 / 6 / 12
     principalPeriod = 1,       // months per principal period: 1 / 3 / 6 / 12
-    principalStartMonth = 1,   // where the principal frequency starts counting
+    moratoriumMonths = 0,      // both legs start counting the month after it ends
+    idpFlags = [],             // moratorium months whose interest is Paid
+    capFlags = [],             // moratorium months whose interest is Capitalized
     principalBasis = 'fixed',  // 'fixed' (equal) | 'custom' (one amount per date)
     customPrincipals = [],     // used when principalBasis === 'custom'
-    intFlags = [],             // per-month override: 'paid' | 'accrued' | 'capitalized'
     cofRate = 0,
   } = p;
 
   const monthlyRate = ratePerYear / 12;
   const monthlyCof = cofRate / 12;
   const rb = rateBook(p);
-  const pMonths = principalPaymentMonths(principalStartMonth, tenorMonths, principalPeriod);
+  // After the moratorium, interest settles every `interestPeriod` months and principal every
+  // `principalPeriod` months, both counted from the month after it ends; maturity settles both.
+  const pMonths = principalPaymentMonths(moratoriumMonths + 1, tenorMonths, principalPeriod);
   const pSet = new Set(pMonths);
+  const isInterestMonth = (m) => m === tenorMonths || (m - moratoriumMonths) % interestPeriod === 0;
 
   const rows = [{ sl: 0, installment: 0, interest: 0, principal: 0, urpa: loanAmount, interestExpense: 0, idpReceivable: 0 }];
   let urpa = loanAmount;
@@ -578,8 +574,12 @@ export function buildSplitSchedule(p) {
     // Interest first, then principal — so the month's interest is always on the opening balance.
     const interest = rb.layered ? urpa * rb.factor(m, m) : urpa * monthlyRate;
     accruedReceivable += interest;
-    const flag = pSet.has(m) ? 'paid'
-      : (intFlags[m - 1] || defaultIntFlag(m, interestPeriod, pSet, tenorMonths));
+    // Moratorium months take the treatment chosen in their boxes (unmarked = accrued, and the
+    // accrual is collected at the first interest date after it); later months follow the
+    // frequencies, and a principal month always settles its interest.
+    const flag = m <= moratoriumMonths
+      ? (capFlags[m - 1] ? 'capitalized' : (idpFlags[m - 1] ? 'paid' : 'accrued'))
+      : ((pSet.has(m) || isInterestMonth(m)) ? 'paid' : 'accrued');
 
     let installment = 0, principal = 0;
     if (flag === 'capitalized') {
@@ -616,7 +616,9 @@ export function buildSplitSchedule(p) {
 
   applyIntExpenseAccrual(rows, monthlyCof, rb.layered ? (i) => rb.cof(i) / 12 : null);
   if (rb.layered) rows.forEach((r) => { if (r.sl > 0) { r.rate = rb.rate(r.sl); r.cof = rb.cof(r.sl); } });
-  return { rows, accruedReceivable, capitalizedPrincipal: loanAmount, principalMonths: pMonths };
+  // Principal at the moratorium's end, grown by any capitalized interest.
+  const capitalizedPrincipal = moratoriumMonths > 0 ? rows[moratoriumMonths].urpa : loanAmount;
+  return { rows, accruedReceivable, capitalizedPrincipal, principalMonths: pMonths };
 }
 
 // ============================================================
@@ -749,15 +751,14 @@ export function buildRateRevisionStructured(p) {
     // Split interest/principal modality — recognised structurally, like the Customized layer.
     interestPeriod = null,
     principalPeriod = null,
-    principalStartMonth = 1,
     principalBasis = 'fixed',
     customPrincipals = [],
-    intFlags = [],
   } = p;
 
   const isSplit = !!(interestPeriod && principalPeriod);
   // Principal dates and the divisor that keeps the payments equal (maturity included).
-  const splitPDates = isSplit ? principalPaymentMonths(principalStartMonth, tenorMonths, principalPeriod) : [];
+  // Split legs count from the month after the moratorium, like buildSplitSchedule.
+  const splitPDates = isSplit ? principalPaymentMonths(moratoriumMonths + 1, tenorMonths, principalPeriod) : [];
   const splitPSet = new Set(splitPDates);
   const ppy = periodsPerYear(paymentModality);
   const start = new Date(disbursementDate);
@@ -865,10 +866,11 @@ export function buildRateRevisionStructured(p) {
       accruedReceivable += interest;
 
       const prin = splitPSet.has(m);
-      // A principal month always settles its interest; otherwise the grid decides, falling
-      // back to the interest frequency.
-      const flag = prin ? 'paid'
-        : (intFlags[m - 1] || ((m % interestPeriod === 0 || m === tenorMonths) ? 'paid' : 'accrued'));
+      // Moratorium months take their boxes' treatment; after it, a principal month always
+      // settles its interest and otherwise the interest frequency decides.
+      const flag = m <= moratoriumMonths
+        ? (capFlags[m - 1] ? 'capitalized' : (idpFlags[m - 1] ? 'paid' : 'accrued'))
+        : ((prin || (m - moratoriumMonths) % interestPeriod === 0 || m === tenorMonths) ? 'paid' : 'accrued');
       if (flag === 'capitalized') {
         urpa += accruedReceivable; accruedReceivable = 0;
       } else if (flag === 'paid') {

@@ -6,7 +6,7 @@
 // that with two modules and a handful of questions the RM can actually answer; the answers
 // decide which form they land on, and are carried into it so nothing is asked twice.
 // ============================================================
-import { el, optionField } from './components.js?v=20260923g';
+import { el, optionField } from './components.js?v=20260923h';
 
 export const MODALITIES = [
   'EMI', 'EQI',

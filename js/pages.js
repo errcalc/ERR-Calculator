@@ -3,23 +3,23 @@ import {
   el, numberField, percentField, optionField, dateField, textField,
   monthBoxesField, layeredField, securityLayersField, rateLayersField, monthRateLayersField, toast, parseDDMMMYYYY, formatDDMMMYYYY,
   openModal, closeModal,
-} from './components.js?v=20260923g';
-import { isoToDDMMMYYYY } from './formatting.js?v=20260923g';
+} from './components.js?v=20260923h';
+import { isoToDDMMMYYYY } from './formatting.js?v=20260923h';
 import {
   buildStructuredSchedule, buildCustomizedSchedule,
   buildRateRevisionStructured, computeMetrics,
   buildSplitSchedule, principalPaymentMonths, SPLIT_MODE, FREQ, FREQ_NAMES,
   computeRevisionMetrics, computeRevisionCustomizedMetrics, buildCofData,
   addMonthsDue, COMMERCIAL_RATE, REFINANCE_RATE, REFINANCE_LENDING_RATE,
-} from './calculations.js?v=20260923g';
-import { formatMoney, formatPercent, formatNumber, formatRateLayers } from './formatting.js?v=20260923g';
-import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20260923g';
+} from './calculations.js?v=20260923h';
+import { formatMoney, formatPercent, formatNumber, formatRateLayers } from './formatting.js?v=20260923h';
+import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20260923h';
 import {
   downloadScheduleAsExcel, downloadSampleAmortization, readUploadedSchedule,
   downloadScheduleAsWord, downloadScheduleAsPDF, downloadVerificationExcel, downloadReportPDF,
   downloadCofSample, readUploadedCof,
   downloadCustomizedRevisionSample, readCustomizedRevisionFile,
-} from './excel.js?v=20260923g';
+} from './excel.js?v=20260923h';
 
 // Cached page state by tab key (also persisted via storage saveDraft)
 const tabState = {};
@@ -214,27 +214,23 @@ export function renderRegularLoan(root, pre = null) {
     options: FREQ_NAMES, value: 'Quarterly', onChange: () => refresh(),
   });
   setTwoLineLabel(prinFreq, 'Principal Payment', 'Frequency');
-  const prinStart = numberField({
-    label: 'Principal Payments Start From Month', name: 'prinStart', integerOnly: true, min: 1,
-  });
-  setTwoLineLabel(prinStart, 'Principal Payments', 'Start From Month');
-  prinStart.setValue(1); // principal normally starts with the loan; a later month = principal grace
-  prinStart.input.addEventListener('input', () => refresh());
+  // Spells out the months principal is actually paid, which the frequency alone leaves the RM
+  // to work out from the moratorium's end.
   const prinHint = el('span', { class: 'help' });
-  prinStart.appendChild(prinHint);
+  prinFreq.appendChild(prinHint);
   const prinBasis = optionField({
     label: 'Principal Amount', name: 'prinBasis',
     options: ['Fixed (Equal)', 'Different per Date'], value: 'Fixed (Equal)', onChange: () => refresh(),
   });
 
-  // Principal dates implied by the current inputs — drives the custom-amount boxes, the
-  // locked months in the grid, and validation.
+  // Principal dates implied by the current inputs — drives the custom-amount boxes and the
+  // readout. Principal counts from the month after the moratorium.
   function splitPrincipalMonths() {
     const tenor = loanTenor.getValue() || 0;
-    const start = Math.max(1, prinStart.getValue() || 1);
+    const mora = moratoriumAvail.getValue() === 'Yes' ? (moratoriumPeriod.getValue() || 0) : 0;
     const period = FREQ[prinFreq.getValue()] || 1;
-    if (!tenor || start > tenor) return [];
-    return principalPaymentMonths(start, tenor, period);
+    if (!tenor || mora + 1 > tenor) return [];
+    return principalPaymentMonths(mora + 1, tenor, period);
   }
 
   // One amount box per principal date. The LAST box is read-only and shows the remainder, so
@@ -275,21 +271,6 @@ export function renderRegularLoan(root, pre = null) {
     box.classList.toggle('invalid', rem < 0);
   }
 
-  // Whole-tenor interest grid. Principal months are locked to Paid; everything else is
-  // pre-filled from the interest frequency and can be overridden month by month.
-  const splitGrid = monthBoxesField({
-    name: 'splitFlags', label: 'Interest Treatment by Month',
-    getCount: () => (isSplit() ? (loanTenor.getValue() || 0) : 0),
-    selectAll: true, capitalizable: true, groupByYear: true,
-    lockedFn: (i) => splitPrincipalMonths().includes(i + 1),
-    defaultFn: (i) => {
-      const m = i + 1;
-      const tenor = loanTenor.getValue() || 0;
-      const ip = FREQ[intFreq.getValue()] || 1;
-      return (m % ip === 0 || m === tenor) ? 1 : 0;
-    },
-  });
-
   const totalCof = percentField({ label: 'Total Cost of Fund [COF/ISC + OPEX]', name: 'totalCof' });
   setTwoLineLabel(totalCof, 'Total Cost of Fund', '(COF/ISC + OPEX)');
 
@@ -325,13 +306,12 @@ export function renderRegularLoan(root, pre = null) {
   section.appendChild(el('div', { class: 'form-row' }, loanTenor, paymentMode));
   // After the tenor, since the layers are counted in the loan's months.
   if (intRateLayers) section.appendChild(el('div', { class: 'sub-card' }, intRateLayers));
-  // Split interest/principal block — frequencies, principal start + basis, the optional
-  // per-date amount boxes, and the whole-tenor interest grid. Hidden for every other mode.
+  // Split interest/principal block — the two frequencies (both counted from the moratorium's
+  // end), the principal basis and the optional per-date amount boxes. Hidden for other modes.
   const splitSection = el('div', { class: 'hidden' },
     el('div', { class: 'form-row' }, intFreq, prinFreq),
-    el('div', { class: 'form-row' }, prinStart, prinBasis),
+    el('div', { class: 'form-row' }, prinBasis),
     customWrap,
-    el('div', { class: 'form-row full' }, el('div', { class: 'sub-card' }, splitGrid)),
   );
   section.appendChild(splitSection);
   section.appendChild(el('div', { class: 'form-row' }, totalCof, fundedSecurityType));
@@ -353,14 +333,9 @@ export function renderRegularLoan(root, pre = null) {
 
   function refresh() {
     const split = isSplit();
-    // The split type carries no moratorium fields: a moratorium is expressed in the grid
-    // (months set to Accrued/Capitalized) plus a later principal start, which is strictly
-    // more flexible since those months need not share one treatment.
-    const moraRow = moratoriumAvail.parentElement;
-    if (moraRow) moraRow.classList.toggle('hidden', split);
     splitSection.classList.toggle('hidden', !split);
 
-    const moraYes = !split && moratoriumAvail.getValue() === 'Yes';
+    const moraYes = moratoriumAvail.getValue() === 'Yes';
     moratoriumPeriod.classList.toggle('hidden', !moraYes);
     const months = moraYes ? (moratoriumPeriod.getValue() || 0) : 0;
     moraSection.classList.toggle('hidden', months === 0);
@@ -377,7 +352,6 @@ export function renderRegularLoan(root, pre = null) {
       customWrap.classList.toggle('hidden', prinBasis.getValue() !== 'Different per Date');
       rebuildCustomBoxes();
       prinHint.textContent = principalScheduleHint(splitPrincipalMonths(), FREQ[prinFreq.getValue()] || 1);
-      splitGrid.refresh();
     }
 
     fundedSecurityType.setOptions(securityOptions());
@@ -388,7 +362,7 @@ export function renderRegularLoan(root, pre = null) {
   const fields = {
     loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
     loanTenor, paymentMode, totalCof, fundedSecurityType, csAmount, csRate, numInst,
-    intFreq, prinFreq, prinStart, prinBasis, splitGrid, intRateLayers,
+    intFreq, prinFreq, prinBasis, intRateLayers,
     getCustom: () => customBoxes.map(b => b.getValue() || 0),
   };
   section.appendChild(el('div', { class: 'action-bar' },
@@ -412,7 +386,7 @@ export function renderRegularLoan(root, pre = null) {
     const msg = validateRegular(inputs);
     if (msg) return { msg };
     const split = inputs.paymentMode === SPLIT_MODE;
-    const moraMonths = (!split && inputs.moratoriumAvail === 'Yes') ? inputs.moratoriumPeriod : 0;
+    const moraMonths = inputs.moratoriumAvail === 'Yes' ? inputs.moratoriumPeriod : 0;
     const isCs = inputs.fundedSecurityType === 'FDR' || inputs.fundedSecurityType === 'Cash Security';
     const rateLayers = rateLayerParams(inputs);
     const params = {
@@ -435,10 +409,8 @@ export function renderRegularLoan(root, pre = null) {
       Object.assign(params, {
         interestPeriod: FREQ[inputs.intFreq],
         principalPeriod: FREQ[inputs.prinFreq],
-        principalStartMonth: inputs.prinStart,
         principalBasis: inputs.prinBasis === 'Different per Date' ? 'custom' : 'fixed',
         customPrincipals: inputs.customPrincipals,
-        intFlags: inputs.splitFlags,
       });
     }
     const schedule = split ? buildSplitSchedule(params) : buildStructuredSchedule(params);
@@ -470,10 +442,7 @@ function collectRegularInputs(f) {
     // Split interest/principal type
     intFreq: f.intFreq ? f.intFreq.getValue() : null,
     prinFreq: f.prinFreq ? f.prinFreq.getValue() : null,
-    prinStart: f.prinStart ? (f.prinStart.getValue() || 1) : 1,
     prinBasis: f.prinBasis ? f.prinBasis.getValue() : null,
-    splitStates: f.splitGrid ? f.splitGrid.getValue() : [],
-    splitFlags: f.splitGrid ? f.splitGrid.getIntFlags() : [],
     customPrincipals: f.getCustom ? f.getCustom() : [],
   };
 }
@@ -486,13 +455,15 @@ function validateRegular(i) {
   if (!i.loanTenor) return fail('Enter Loan Tenor.');
   if (i.rateLayered) { const m = validateRateLayers(i.intRateLayers, i.loanTenor); if (m) return fail(m); }
   if (!i.paymentMode) return fail('Select a Payment Mode.');
+  if (!i.moratoriumAvail) return fail('Select whether a moratorium is available.');
+  if (i.moratoriumAvail === 'Yes' && !i.moratoriumPeriod) return fail('Enter Moratorium Period.');
+  if (i.moratoriumAvail === 'Yes' && i.loanTenor <= i.moratoriumPeriod) return fail('Loan Tenor must exceed Moratorium Period.');
   if (i.paymentMode === SPLIT_MODE) {
     if (FREQ[i.intFreq] > FREQ[i.prinFreq])
       return fail(`Interest cannot be paid less often than principal — ${i.intFreq} interest with ${i.prinFreq} principal leaves a principal month with no interest settlement.`);
-    if (i.prinStart < 1 || i.prinStart > i.loanTenor)
-      return fail(`Principal Payments Start From Month must be between 1 and ${i.loanTenor}.`);
     if (i.prinBasis === 'Different per Date') {
-      const dates = principalPaymentMonths(i.prinStart, i.loanTenor, FREQ[i.prinFreq]);
+      const mora = i.moratoriumAvail === 'Yes' ? i.moratoriumPeriod : 0;
+      const dates = principalPaymentMonths(mora + 1, i.loanTenor, FREQ[i.prinFreq]);
       const earlier = i.customPrincipals.slice(0, Math.max(0, dates.length - 1));
       const typed = earlier.reduce((s, v) => s + (v || 0), 0);
       if (typed > i.loanAmount)
@@ -509,9 +480,6 @@ function validateRegular(i) {
       return fail(`Enter ${secName(i)} Amount and Rate.`);
     return null;
   }
-  if (!i.moratoriumAvail) return fail('Select whether a moratorium is available.');
-  if (i.moratoriumAvail === 'Yes' && !i.moratoriumPeriod) return fail('Enter Moratorium Period.');
-  if (i.moratoriumAvail === 'Yes' && i.loanTenor <= i.moratoriumPeriod) return fail('Loan Tenor must exceed Moratorium Period.');
   if (i.totalCof === null) return fail('Enter Total Cost of Fund.');
   if (!i.fundedSecurityType) return fail('Select a Funded Security Type.');
   if (i.fundedSecurityType === 'FDR' || i.fundedSecurityType === 'Cash Security') {
@@ -547,7 +515,7 @@ export function renderCustomizedLoan(root, pre = null) {
   const intRateLayers = layeredRates ? interestRateLayersField(() => loanTenor.getValue()) : null;
   loanTenor.input.addEventListener('input', () => {
     if (intRateLayers) intRateLayers.refresh();
-    refreshLayerOpts(); refresh(); paymentLayers.applyLayerRules(); refreshSplitGrid();
+    refreshLayerOpts(); refresh(); paymentLayers.applyLayerRules();
   });
 
   function fromOptions() {
@@ -620,7 +588,6 @@ export function renderCustomizedLoan(root, pre = null) {
           else if (!f.value) f.value = fallback;
         });
       });
-      refreshSplitGrid();
     },
   });
   // Toast on the layered field's "cannot add" callback (e.g. last layer already ends at maturity)
@@ -645,46 +612,6 @@ export function renderCustomizedLoan(root, pre = null) {
     paymentLayers.setColumnHidden('intFreq', !anySplit);
     paymentLayers.setColumnHidden('prinFreq', !anySplit);
     paymentLayers.setColumnHidden('customPrincipal', !anyCustomPrincipal);
-  }
-
-  // ---- Split interest/principal support -------------------------------------------------
-  // One whole-tenor grid serves every split layer. Months belonging to other layer types are
-  // rendered inert, since their interest is decided by that layer's own payment type.
-  function splitLayers() {
-    return paymentLayers.getValue()
-      .filter(r => r.paymentType === SPLIT_MODE && r.fromInstallment && r.toInstallment)
-      .map(r => ({
-        from: Number(r.fromInstallment),
-        to: r.toInstallment === 'LAST' ? (loanTenor.getValue() || 0) : Number(r.toInstallment),
-        ip: FREQ[r.intFreq] || 1,
-        pp: FREQ[r.prinFreq] || 1,
-      }));
-  }
-  const splitLayerAt = (m) => splitLayers().find(L => m >= L.from && m <= L.to) || null;
-  const custSplitGrid = monthBoxesField({
-    name: 'custSplitFlags', label: 'Interest Treatment by Month',
-    getCount: () => (splitLayers().length ? (loanTenor.getValue() || 0) : 0),
-    selectAll: true, capitalizable: true, groupByYear: true,
-    disabledFn: (i) => !splitLayerAt(i + 1),
-    lockedFn: (i) => {
-      const L = splitLayerAt(i + 1);
-      if (!L) return false;
-      const m = i + 1;
-      return ((m - L.from + 1) % L.pp === 0) || m === L.to; // principal month
-    },
-    defaultFn: (i) => {
-      const L = splitLayerAt(i + 1);
-      if (!L) return 0;
-      const m = i + 1;
-      return (((m - L.from + 1) % L.ip === 0) || m === L.to) ? 1 : 0;
-    },
-  });
-  const custSplitWrap = el('div', { class: 'form-row full hidden' },
-    el('div', { class: 'sub-card' }, custSplitGrid));
-  function refreshSplitGrid() {
-    const any = splitLayers().length > 0;
-    custSplitWrap.classList.toggle('hidden', !any);
-    if (any) custSplitGrid.refresh();
   }
 
   const totalCof = percentField({ label: 'Total Cost of Fund [COF/ISC + OPEX]', name: 'totalCof' });
@@ -712,7 +639,6 @@ export function renderCustomizedLoan(root, pre = null) {
   section.appendChild(el('div', { class: 'form-row' }, loanTenor));
   if (intRateLayers) section.appendChild(el('div', { class: 'sub-card' }, intRateLayers));
   section.appendChild(el('div', { class: 'sub-card' }, paymentLayers));
-  section.appendChild(custSplitWrap);
   section.appendChild(el('div', { class: 'form-row' }, totalCof, fundedSecurityType));
   // Security detail row — depends on Funded Security Type (rebuilt in refresh()).
   const secDetailRow = el('div', { class: 'form-row' });
@@ -745,7 +671,7 @@ export function renderCustomizedLoan(root, pre = null) {
   const fields = {
     loanAmount, offeredRate, moratoriumAvail, moratoriumPeriod, idpField,
     loanTenor, paymentLayers, totalCof, fundedSecurityType, csAmount, csRate, numInst,
-    custSplitGrid, intRateLayers,
+    intRateLayers,
   };
   section.appendChild(el('div', { class: 'action-bar' },
     resetButton('customized', () => renderCustomizedLoan(root, pre), () => collectCustomizedInputs(fields))));
@@ -778,7 +704,6 @@ export function renderCustomizedLoan(root, pre = null) {
       capFlags: inputs.capFlags,
       cofRate: inputs.totalCof,
       layers: inputs.paymentLayers,
-      intFlags: inputs.custSplitFlags,
     };
     const schedule = buildCustomizedSchedule(params);
     const metrics = computeMetrics(schedule, {
@@ -819,8 +744,6 @@ function collectCustomizedInputs(f) {
       principalPeriod: r.paymentType === SPLIT_MODE ? (FREQ[r.prinFreq] || 1) : null,
       intFreq: r.intFreq, prinFreq: r.prinFreq,
     })),
-    custSplitStates: f.custSplitGrid ? f.custSplitGrid.getValue() : [],
-    custSplitFlags: f.custSplitGrid ? f.custSplitGrid.getIntFlags() : [],
     totalCof: f.totalCof.getValue(),
     fundedSecurityType: f.fundedSecurityType.getValue(),
     csAmount: f.csAmount.getValue(),
@@ -928,21 +851,18 @@ export function renderRateRevisionStructured(root, pre = null) {
   const rrPrinFreq = optionField({ label: 'Principal Payment Frequency', name: 'rrPrinFreq',
     options: FREQ_NAMES, value: 'Quarterly', onChange: () => refresh() });
   setTwoLineLabel(rrPrinFreq, 'Principal Payment', 'Frequency');
-  const rrPrinStart = numberField({ label: 'Principal Payments Start From Month', name: 'rrPrinStart', integerOnly: true, min: 1 });
-  setTwoLineLabel(rrPrinStart, 'Principal Payments', 'Start From Month');
-  rrPrinStart.setValue(1);
-  rrPrinStart.input.addEventListener('input', () => refresh());
+  // The months principal is actually paid, counted from the moratorium's end.
   const rrPrinHint = el('span', { class: 'help' });
-  rrPrinStart.appendChild(rrPrinHint);
+  rrPrinFreq.appendChild(rrPrinHint);
   const rrPrinBasis = optionField({ label: 'Principal Amount', name: 'rrPrinBasis',
     options: ['Fixed (Equal)', 'Different per Date'], value: 'Fixed (Equal)', onChange: () => refresh() });
 
   function rrPrincipalMonths() {
     const t = tenorMonths.getValue() || 0;
-    const st = Math.max(1, rrPrinStart.getValue() || 1);
+    const mora = moratoriumAvail.getValue() === 'Yes' ? (moratoriumPeriod.getValue() || 0) : 0;
     const per = FREQ[rrPrinFreq.getValue()] || 1;
-    if (!t || st > t) return [];
-    return principalPaymentMonths(st, t, per);
+    if (!t || mora + 1 > t) return [];
+    return principalPaymentMonths(mora + 1, t, per);
   }
   const rrCustomWrap = el('div', { class: 'sub-card hidden' });
   const rrCustomBoxes = [];
@@ -972,22 +892,10 @@ export function renderRateRevisionStructured(root, pre = null) {
     box.input.value = formatNumber(rem, { decimals: 2 });
     box.classList.toggle('invalid', rem < 0);
   }
-  const rrSplitGrid = monthBoxesField({
-    name: 'rrSplitFlags', label: 'Interest Treatment by Month',
-    getCount: () => (isSplit() ? (tenorMonths.getValue() || 0) : 0),
-    selectAll: true, capitalizable: true, groupByYear: true,
-    lockedFn: (i) => rrPrincipalMonths().includes(i + 1),
-    defaultFn: (i) => {
-      const mth = i + 1, t = tenorMonths.getValue() || 0;
-      const ip = FREQ[rrIntFreq.getValue()] || 1;
-      return (mth % ip === 0 || mth === t) ? 1 : 0;
-    },
-  });
   const rrSplitSection = el('div', { class: 'hidden' },
     el('div', { class: 'form-row' }, rrIntFreq, rrPrinFreq),
-    el('div', { class: 'form-row' }, rrPrinStart, rrPrinBasis),
+    el('div', { class: 'form-row' }, rrPrinBasis),
     rrCustomWrap,
-    el('div', { class: 'form-row full' }, el('div', { class: 'sub-card' }, rrSplitGrid)),
   );
 
   // Actual loan maturity = disbursement + tenor months − 1 day.
@@ -1053,14 +961,12 @@ export function renderRateRevisionStructured(root, pre = null) {
   section.appendChild(el('div', { class: 'form-row' }, referenceField));
 
   function refresh() {
-    // This modality carries no moratorium: a moratorium is expressed in the grid plus a later
-    // principal start, exactly as in Loan Facilities - Structured.
+    // The split modality has the same moratorium fields as the others; its two frequencies
+    // count from the month after the moratorium.
     const split = isSplit();
-    const moraRow = moratoriumAvail.parentElement;
-    if (moraRow) moraRow.classList.toggle('hidden', split);
     rrSplitSection.classList.toggle('hidden', !split);
 
-    const moraYes = !split && moratoriumAvail.getValue() === 'Yes';
+    const moraYes = moratoriumAvail.getValue() === 'Yes';
     moratoriumPeriod.classList.toggle('hidden', !moraYes);
     const months = moraYes ? (moratoriumPeriod.getValue() || 0) : 0;
     moraSection.classList.toggle('hidden', months === 0);
@@ -1074,30 +980,26 @@ export function renderRateRevisionStructured(root, pre = null) {
       rrCustomWrap.classList.toggle('hidden', rrPrinBasis.getValue() !== 'Different per Date');
       rrRebuildCustom();
       rrPrinHint.textContent = principalScheduleHint(rrPrincipalMonths(), FREQ[rrPrinFreq.getValue()] || 1);
-      rrSplitGrid.refresh();
     }
   }
   refresh();
 
+  const fields = {
+    initialAmount, disbursementDate, moratoriumAvail, moratoriumPeriod, idpField,
+    paymentModality, tenorMonths, rateLayers, securityLayers, referenceField,
+    rrIntFreq, rrPrinFreq, rrPrinBasis,
+    getRrCustom: () => rrCustomBoxes.map(b => b.getValue() || 0),
+  };
   section.appendChild(el('div', { class: 'action-bar' },
-    resetButton('revisionStructured', () => renderRateRevisionStructured(root), () => ({
-      ...collectRevisionStructuredInputs({
-        initialAmount, disbursementDate, moratoriumAvail, moratoriumPeriod, idpField,
-        paymentModality, tenorMonths, rateLayers, securityLayers, referenceField,
-        rrIntFreq, rrPrinFreq, rrPrinStart, rrPrinBasis, rrSplitGrid,
-        getRrCustom: () => rrCustomBoxes.map(b => b.getValue() || 0),
-      }),
+    // Re-render with the same step-1 answers, so a reset keeps the form the RM asked for.
+    resetButton('revisionStructured', () => renderRateRevisionStructured(root, pre), () => ({
+      ...collectRevisionStructuredInputs(fields),
       cofRows: (cofUpload.getRows() || []).length,
     }))));
   const { left, right: resultsPanel } = workbench(root);
   left.appendChild(section);
 
-  restoreDraft('revisionStructured', {
-    initialAmount, disbursementDate, moratoriumAvail, moratoriumPeriod, idpField,
-    paymentModality, tenorMonths, rateLayers, securityLayers, referenceField,
-    rrIntFreq, rrPrinFreq, rrPrinStart, rrPrinBasis, rrSplitGrid,
-    getRrCustom: () => rrCustomBoxes.map(b => b.getValue() || 0),
-  });
+  restoreDraft('revisionStructured', fields);
   // After the draft, never before: the entry answers are the fresher truth.
   applyEntryAnswers([
     [moratoriumAvail, pre && pre.moratorium],
@@ -1105,23 +1007,13 @@ export function renderRateRevisionStructured(root, pre = null) {
   ]);
   refresh();
   setTimeout(() => { rateLayers.applyLayerRules(); securityLayers.applyLayerRules(); }, 150);
-  attachDraftAutosave('revisionStructured', section, () => collectRevisionStructuredInputs({
-    initialAmount, disbursementDate, moratoriumAvail, moratoriumPeriod, idpField,
-    paymentModality, tenorMonths, rateLayers, securityLayers, referenceField,
-    rrIntFreq, rrPrinFreq, rrPrinStart, rrPrinBasis, rrSplitGrid,
-    getRrCustom: () => rrCustomBoxes.map(b => b.getValue() || 0),
-  }));
+  attachDraftAutosave('revisionStructured', section, () => collectRevisionStructuredInputs(fields));
 
   function compute() {
     // Every guard below used to be a toast fired by the Calculate button. Live, they become
     // the line shown in the results pane instead.
     const stop = (msg) => ({ msg });
-    const inputs = collectRevisionStructuredInputs({
-      initialAmount, disbursementDate, moratoriumAvail, moratoriumPeriod, idpField,
-      paymentModality, tenorMonths, rateLayers, securityLayers, referenceField,
-      rrIntFreq, rrPrinFreq, rrPrinStart, rrPrinBasis, rrSplitGrid,
-      getRrCustom: () => rrCustomBoxes.map(b => b.getValue() || 0),
-    });
+    const inputs = collectRevisionStructuredInputs(fields);
     if (!inputs.initialAmount) return stop('Enter Initial Loan Amount.');
     if (!inputs.disbursementDate) return stop('Enter Disbursement Date.');
     const dow = new Date(inputs.disbursementDate).getDay();
@@ -1129,14 +1021,15 @@ export function renderRateRevisionStructured(root, pre = null) {
     if (!inputs.tenorMonths) return stop('Enter Loan Tenor.');
     if (!inputs.paymentModality) return stop('Select a Payment Modality.');
     const rrSplit = inputs.paymentModality === SPLIT_MODE;
-    if (!rrSplit && !inputs.moratoriumAvail) return stop('Select whether a moratorium is given at disbursement.');
+    if (!inputs.moratoriumAvail) return stop('Select whether a moratorium is given at disbursement.');
+    const mora = inputs.moratoriumAvail === 'Yes' ? inputs.moratoriumPeriod : 0;
+    if (inputs.moratoriumAvail === 'Yes' && !mora) return stop('Enter Moratorium Period.');
+    if (mora && inputs.tenorMonths <= mora) return stop('Loan Tenor must exceed Moratorium Period.');
     if (rrSplit) {
       if (FREQ[inputs.rrIntFreq] > FREQ[inputs.rrPrinFreq])
         return stop(`Interest cannot be paid less often than principal — ${inputs.rrIntFreq} interest with ${inputs.rrPrinFreq} principal leaves a principal month with no interest settlement.`);
-      if (inputs.rrPrinStart < 1 || inputs.rrPrinStart > inputs.tenorMonths)
-        return stop(`Principal Payments Start From Month must be between 1 and ${inputs.tenorMonths}.`);
       if (inputs.rrPrinBasis === 'Different per Date') {
-        const dts = principalPaymentMonths(inputs.rrPrinStart, inputs.tenorMonths, FREQ[inputs.rrPrinFreq]);
+        const dts = principalPaymentMonths(mora + 1, inputs.tenorMonths, FREQ[inputs.rrPrinFreq]);
         const earlier = inputs.rrCustomPrincipals.slice(0, Math.max(0, dts.length - 1));
         if (earlier.reduce((a, v) => a + (v || 0), 0) > inputs.initialAmount)
           return stop('The principal amounts entered exceed the Initial Loan Amount.');
@@ -1159,7 +1052,6 @@ export function renderRateRevisionStructured(root, pre = null) {
     const { cofData } = buildCofData(cofUpload.getRows(), inputs.disbursementDate, mat);
     if (!cofCoversDisbursement(cofData, inputs.disbursementDate)) return stop(COF_GAP_MSG);
 
-    const mora = (!rrSplit && inputs.moratoriumAvail === 'Yes') ? inputs.moratoriumPeriod : 0;
     const params = {
       initialLoanAmount: inputs.initialAmount,
       disbursementDate: inputs.disbursementDate,
@@ -1177,10 +1069,8 @@ export function renderRateRevisionStructured(root, pre = null) {
       Object.assign(params, {
         interestPeriod: FREQ[inputs.rrIntFreq],
         principalPeriod: FREQ[inputs.rrPrinFreq],
-        principalStartMonth: inputs.rrPrinStart,
         principalBasis: inputs.rrPrinBasis === 'Different per Date' ? 'custom' : 'fixed',
         customPrincipals: inputs.rrCustomPrincipals,
-        intFlags: inputs.rrSplitFlags,
       });
     }
     const schedule = buildRateRevisionStructured(params);
@@ -1208,10 +1098,7 @@ function collectRevisionStructuredInputs(f) {
     // Split interest/principal modality
     rrIntFreq: f.rrIntFreq ? f.rrIntFreq.getValue() : null,
     rrPrinFreq: f.rrPrinFreq ? f.rrPrinFreq.getValue() : null,
-    rrPrinStart: f.rrPrinStart ? (f.rrPrinStart.getValue() || 1) : 1,
     rrPrinBasis: f.rrPrinBasis ? f.rrPrinBasis.getValue() : null,
-    rrSplitStates: f.rrSplitGrid ? f.rrSplitGrid.getValue() : [],
-    rrSplitFlags: f.rrSplitGrid ? f.rrSplitGrid.getIntFlags() : [],
     rrCustomPrincipals: f.getRrCustom ? f.getRrCustom() : [],
   };
 }
@@ -1619,15 +1506,10 @@ function restoreDraft(tabKey, fields) {
     // Split interest/principal type
     if (fields.intFreq && data.intFreq) fields.intFreq.setValue(data.intFreq);
     if (fields.prinFreq && data.prinFreq) fields.prinFreq.setValue(data.prinFreq);
-    if (fields.prinStart && data.prinStart) fields.prinStart.setValue(data.prinStart);
     if (fields.prinBasis && data.prinBasis) fields.prinBasis.setValue(data.prinBasis);
-    if (fields.splitGrid && Array.isArray(data.splitStates)) fields.splitGrid.setValue(data.splitStates);
-    if (fields.custSplitGrid && Array.isArray(data.custSplitStates)) fields.custSplitGrid.setValue(data.custSplitStates);
     if (fields.rrIntFreq && data.rrIntFreq) fields.rrIntFreq.setValue(data.rrIntFreq);
     if (fields.rrPrinFreq && data.rrPrinFreq) fields.rrPrinFreq.setValue(data.rrPrinFreq);
-    if (fields.rrPrinStart && data.rrPrinStart) fields.rrPrinStart.setValue(data.rrPrinStart);
     if (fields.rrPrinBasis && data.rrPrinBasis) fields.rrPrinBasis.setValue(data.rrPrinBasis);
-    if (fields.rrSplitGrid && Array.isArray(data.rrSplitStates)) fields.rrSplitGrid.setValue(data.rrSplitStates);
     if (fields.paymentModality && data.paymentModality) fields.paymentModality.setValue(data.paymentModality);
     if (fields.totalCof && data.totalCof !== undefined) fields.totalCof.setValue(data.totalCof);
     if (fields.fundedSecurityType && data.fundedSecurityType) fields.fundedSecurityType.setValue(data.fundedSecurityType);

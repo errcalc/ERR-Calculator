@@ -1,6 +1,6 @@
 // Per-module user guide — opened from the info button in the header. Plain, simple language
 // (explained as if to a 10-year-old). Sections are collapsed by default; click to expand.
-import { el, openModal, closeModal } from './components.js?v=20260923g';
+import { el, openModal, closeModal } from './components.js?v=20260923h';
 
 // ---- Shared sections reused across modules ----
 const MODALITY_BULLETS = [
@@ -199,24 +199,13 @@ const MANUALS = {
       },
       {
         h: 'Interest & Principal (Separate Frequency) — the extra boxes',
-        p: 'Pick this mode and four more boxes appear. They only show for this mode.',
+        p: 'Pick this mode and three more boxes appear. Like every other mode, a rest period is set with Moratorium Period and its month boxes above; these three boxes decide what happens after it.',
         bullets: [
-          'Interest Payment Frequency — how often interest is actually paid: Monthly, Quarterly, Half-yearly or Yearly.',
+          'Interest Payment Frequency — how often interest is paid once the rest period is over: Monthly, Quarterly, Half-yearly or Yearly.',
           'Principal Payment Frequency — how often a chunk of the loan is repaid. It can never be more often than interest, because interest is always taken first. So Monthly interest with Quarterly principal is fine, but Quarterly interest with Monthly principal is not.',
-          'Principal Payments Start From Month — put 1 if principal starts right away. Put a later month to give the borrower a break from principal at the start while interest is still being paid.',
+          'Both frequencies start counting the month after the rest period ends. With a 6-month rest period, Monthly interest is paid in months 7, 8, 9 … and Quarterly principal in months 9, 12, 15 … — the months are listed under the Principal Payment Frequency box. The last month of the loan always settles whatever is left.',
+          'Interest left waiting at the end of the rest period is collected with the first interest payment after it.',
           'Principal Amount — “Fixed (Equal)” splits the loan evenly across the principal dates. “Different per Date” gives you one box per date so you can type each amount; the last box fills itself in with whatever is left, so the loan always finishes at zero.',
-        ],
-      },
-      {
-        h: 'Interest Treatment by Month',
-        p: 'This mode has no separate rest-period boxes. Instead you get one row of month boxes covering the WHOLE loan, and you click a month to change what happens to its interest — the same three choices as the rest period. That is more flexible, because each month can be different.',
-        bullets: [
-          'Accrued — the interest is not paid this month; it waits and is collected at the next paying month.',
-          'Paid — the interest is paid in cash this month, along with anything waiting from earlier months.',
-          'Capitalized — the interest is added onto the loan instead of being paid, so the borrower then owes interest on it too.',
-          'Months where principal is repaid are locked on Paid and show a small padlock. Interest is always settled where principal is settled.',
-          'The two frequency boxes fill the row in for you. You can still click any unlocked month to change it, and “Reset to Frequency” puts it back.',
-          'A rest period is simply the first few months set to Accrued or Capitalized, with principal starting later.',
         ],
       },
       { h: 'Total Cost of Fund (COF/ISC + OPEX)', p: 'What it costs the bank to get this money, plus its running costs, as a yearly rate. The bank’s real earning is the gap between the Offered Rate and this number. With Interest Rate Layers, Refinance Rate months use 1% instead.' },
@@ -253,7 +242,6 @@ const MANUALS = {
           '“Customized Principal” lets you type exactly how much principal is paid each month in that range.',
           '“Interest & Principal (Separate Frequency)” lets that range pay interest and principal on different months — pick the two frequencies in the Interest Freq. and Principal Freq. boxes on the layer. Custom Principal then means the amount paid on EACH principal date; leave it blank to split the balance evenly.',
           'A layer only shows the boxes its own style can use — an EMI layer has no frequency or Custom Principal boxes at all, because they would mean nothing there.',
-          'If any layer uses that style, month boxes appear below the table for setting each month’s interest. Only the months belonging to those layers are shown; the rest are left out, because their own payment style already decides what happens to them.',
           'On a narrow screen the table becomes one card per layer, with each box labelled down the side.',
         ],
       },
@@ -280,7 +268,7 @@ const MANUALS = {
       ANSWERED_SECTION,
       { h: 'Moratorium Period (Months)', p: 'How many months the rest period lasts. It only appears when you said there IS a moratorium.' },
       IDP_SECTION,
-      { h: 'Payment Modality — chosen in step 1', p: 'Picked before you reached this form; use “Change” at the top to swap it. It sets how the borrower pays after the rest period — EMI (every month), EQI (every 3 months), Equal Principal + Interest, or “Interest & Principal (Separate Frequency)” when interest and principal fall on different months. Picking the last one swaps the rest-period boxes for the same frequency boxes and month grid used on the Structured page, and a rate change part-way through a month is split across that month by day count — the new rate then applies for the rest of the loan.' },
+      { h: 'Payment Modality — chosen in step 1', p: 'Picked before you reached this form; use “Change” at the top to swap it. It sets how the borrower pays after the rest period — EMI (every month), EQI (every 3 months), Equal Principal + Interest, or “Interest & Principal (Separate Frequency)” when interest and principal fall on different months. Picking the last one adds the same two frequency boxes as on the new-loan form, counted from the month after the rest period; a rate change part-way through a month is split across that month by day count — the new rate then applies for the rest of the loan.' },
       { h: 'Loan Tenor including Moratorium (Months)', p: 'The total months of the loan, counting the rest period.' },
       {
         h: 'Lending Rate Layers',
