@@ -179,10 +179,12 @@ body {
 }
 
 /* ============ Main / pages ============ */
+/* The page grows with the monitor so both panes do too; the cap only stops a very wide screen
+   stretching every input box past readability. */
 main {
   flex: 1;
   padding: 12px 16px 32px;
-  max-width: 1240px;
+  max-width: 1920px;
   margin: 0 auto;
   width: 100%;
 }
@@ -1041,20 +1043,18 @@ table.schedule th {
   font-weight: 600;
   font-size: 12px;
   letter-spacing: 0.3px;
-  /* Not sticky: .table-wrap must keep overflow-x for narrow panes, and an overflow
-     container captures sticky positioning in BOTH axes — so a sticky header here would
-     silently scroll away with the page rather than hold. */
 }
-/* The schedule used to scroll inside its own 420px box — a scrollbar inside a scrollbar.
-   It now flows at full height and the page scrolls, which also lets the sticky column
-   headers work against the page. */
+/* The schedule flows at full height and the page scrolls (no scrollbar inside a scrollbar). */
 .table-wrap {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
-/* A 7-column schedule (with Date and Accrued Interest) needs ~700px and the pane never
-   exceeds 596px, so sideways scrolling has to stay available at every width. */
+/* A pane too narrow for every column scrolls the table sideways. An overflow box captures
+   sticky positioning in both axes, so the column names can only stay pinned under the app bar
+   when the whole table fits its pane — pages.js then marks the wrap .fits. */
 .table-wrap { overflow-x: auto; }
+.table-wrap.fits { overflow: visible; }
+.table-wrap.fits table.schedule th { position: sticky; top: var(--app-header-h); z-index: 2; }
 
 /* Compare view */
 .compare-grid-wrap { margin-top: 12px; }
@@ -1359,7 +1359,7 @@ table.schedule th {
 .wb-input { container-type: inline-size; container-name: inputpane; }
 .wb-output { container-type: inline-size; container-name: outputpane; }
 
-@container inputpane (max-width: 700px) {
+@container inputpane (max-width: 820px) {
 /* Layers stop being a table whenever their PANE is narrow — not just on a phone.
    Each layer becomes a card of label/value rows, using the data-label the cell already
    carries. Column headers are redundant once every value is labelled in place. */
@@ -1374,7 +1374,7 @@ table.schedule th {
   margin-bottom: 10px;
 }
 /* Label above the control, exactly like every other .field in the app — and the only
-   layout that gives "Interest & Principal (Separate Frequency)" the width it needs. */
+   layout that gives "Separate Int./Prin. Frequency" the width it needs. */
 .layers .layer-cell {
   display: block;
   padding: 6px 0;
@@ -1395,7 +1395,7 @@ table.schedule th {
   text-align: left;
 }
 /* A <select> never triggers that zoom, so it can stay smaller — which is what lets the
-   longest option ("Interest & Principal (Separate Frequency)") fit at 375px. */
+   longest option ("Separate Int./Prin. Frequency") fit at 375px. */
 .layers .layer-row select {
   font-size: 14px;
   padding: 7px 10px;

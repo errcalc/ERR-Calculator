@@ -3,26 +3,35 @@ import {
   el, numberField, percentField, optionField, dateField, textField,
   monthBoxesField, layeredField, securityLayersField, rateLayersField, monthRateLayersField, toast, parseDDMMMYYYY, formatDDMMMYYYY,
   openModal, closeModal,
-} from './components.js?v=20261101b';
-import { isoToDDMMMYYYY } from './formatting.js?v=20261101b';
+} from './components.js?v=20261101g';
+import { isoToDDMMMYYYY } from './formatting.js?v=20261101g';
 import {
   buildStructuredSchedule, buildCustomizedSchedule,
   buildRateRevisionStructured, computeMetrics,
   buildSplitSchedule, principalPaymentMonths, SPLIT_MODE, FREQ, FREQ_NAMES,
   computeRevisionMetrics, computeRevisionCustomizedMetrics, buildCofData,
   addMonthsDue, COMMERCIAL_RATE, REFINANCE_RATE, REFINANCE_LENDING_RATE,
-} from './calculations.js?v=20261101b';
-import { formatMoney, formatPercent, formatNumber, formatRateLayers } from './formatting.js?v=20261101b';
-import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20261101b';
+} from './calculations.js?v=20261101g';
+import { formatMoney, formatPercent, formatNumber, formatRateLayers } from './formatting.js?v=20261101g';
+import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20261101g';
 import {
   downloadScheduleAsExcel, downloadSampleAmortization, readUploadedSchedule,
   downloadScheduleAsWord, downloadScheduleAsPDF, downloadVerificationExcel, downloadReportPDF,
   downloadCofSample, readUploadedCof,
   downloadCustomizedRevisionSample, readCustomizedRevisionFile,
-} from './excel.js?v=20261101b';
+} from './excel.js?v=20261101g';
 
 // Cached page state by tab key (also persisted via storage saveDraft)
 const tabState = {};
+
+// Each form's name on downloads (report title, Verification Excel, file names) and in saved
+// summaries: the module name on its landing card plus the route, worded as the user guide words it.
+export const PAGE_TITLES = {
+  regular: 'ERR - New Loan Facility — one payment style',
+  customized: 'ERR - New Loan Facility — payment layers',
+  revisionStructured: 'ERR - Rate Revision — from the loan details',
+  revisionCustomized: 'ERR - Rate Revision — from an uploaded schedule',
+};
 
 // Render a field's label across two lines: a primary phrase plus a secondary part.
 // The secondary part stays inline on desktop (reads as one line, unchanged look) and
@@ -420,7 +429,7 @@ export function renderRegularLoan(root, pre = null) {
     }
     const schedule = split ? buildSplitSchedule(params) : buildStructuredSchedule(params);
     const metrics = computeMetrics(schedule, params);
-    const ctx = { pageType: 'regular', pageTitle: 'Loan Facilities — Structured', inputs, params, schedule, metrics };
+    const ctx = { pageType: 'regular', pageTitle: PAGE_TITLES.regular, inputs, params, schedule, metrics };
     return { ctx };
   }
   attachLiveRecalc(section, resultsPanel, compute);
@@ -551,7 +560,7 @@ export function renderCustomizedLoan(root, pre = null) {
           'Customized Principal (Monthly)', 'Customized Principal (Quarterly)', 'EMI', 'EQI',
           'Equal Principal + Interest (Monthly)', 'Equal Principal + Interest (Quarterly)',
           SPLIT_MODE,
-        ], width: '1.3fr' },
+        ], width: '1.8fr' },
       // Only meaningful for SPLIT_MODE layers; disabled for every other type. The layer's own
       // From month anchors both legs, so there is no per-layer principal start — an
       // interest-only prefix is just an earlier layer.
@@ -719,7 +728,7 @@ export function renderCustomizedLoan(root, pre = null) {
       securityKind: inputs.fundedSecurityType,
       numInst: inputs.numInst,
     });
-    const ctx = { pageType: 'customized', pageTitle: 'Loan Facilities — Customized', inputs, params, schedule, metrics };
+    const ctx = { pageType: 'customized', pageTitle: PAGE_TITLES.customized, inputs, params, schedule, metrics };
     return { ctx };
   }
   attachLiveRecalc(section, resultsPanel, compute);
@@ -1085,7 +1094,7 @@ export function renderRateRevisionStructured(root, pre = null) {
     }
     const schedule = buildRateRevisionStructured(params);
     const metrics = computeRevisionMetrics(schedule);
-    const ctx = { pageType: 'revisionStructured', pageTitle: 'Rate Revision — Structured',
+    const ctx = { pageType: 'revisionStructured', pageTitle: PAGE_TITLES.revisionStructured,
       inputs: { ...inputs, cofRecordCount: cofData.length }, params, schedule, metrics };
     return { ctx };
   }
@@ -1206,7 +1215,7 @@ export function renderRateRevisionCustomized(root) {
       })),
     };
     const ctx = {
-      pageType: 'revisionCustomized', pageTitle: 'Rate Revision — Customized',
+      pageType: 'revisionCustomized', pageTitle: PAGE_TITLES.revisionCustomized,
       inputs: { ...inputs, uploadedRowsCount: uploadedRows.length },
       // cofData + security layers ride along so the Verify Excel can compute the
       // per-row NIM/ERR (yield to maturity) columns with the same day-count method.
@@ -1245,6 +1254,7 @@ function workbench(root) {
   const left = el('div', { class: 'wb-input' });
   const right = el('div', { class: 'wb-output' });
   root.appendChild(el('div', { class: 'workbench' }, left, right));
+  paneWidthWatch.observe(right);
   return { left, right };
 }
 
@@ -1459,7 +1469,23 @@ function renderResults(panel, ctx) {
   dlPdf.addEventListener('click', () => downloadScheduleAsPDF(baseFname() + '.pdf', ctx.schedule, meta));
 
   panel.appendChild(tableCard);
+  setTimeout(markFittingTables, 0);
 }
+
+// A schedule that fits its pane keeps its column names pinned while the page scrolls (CSS
+// .table-wrap.fits); one that needs sideways scrolling keeps its own scroll box instead.
+function markFittingTables() {
+  document.querySelectorAll('.table-wrap').forEach((w) => {
+    const t = w.querySelector('table');
+    if (t) w.classList.toggle('fits', t.offsetWidth <= w.clientWidth + 1);
+  });
+}
+// Re-checked whenever a results pane changes width (window resized, panes stacking or not).
+// A pane that leaves the page is dropped, so re-mounting forms never piles up watchers.
+const paneWidthWatch = new ResizeObserver((entries) => {
+  entries.forEach(({ target }) => { if (!target.isConnected) paneWidthWatch.unobserve(target); });
+  markFittingTables();
+});
 
 // ============================================================
 // Draft preservation

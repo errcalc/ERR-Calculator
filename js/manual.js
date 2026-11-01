@@ -1,13 +1,13 @@
 // Per-module user guide — opened from the info button in the header. Plain, simple language
 // (explained as if to a 10-year-old). Sections are collapsed by default; click to expand.
-import { el, openModal, closeModal } from './components.js?v=20261101b';
+import { el, openModal, closeModal } from './components.js?v=20261101g';
 
 // ---- Shared sections reused across modules ----
 const MODALITY_BULLETS = [
   'EMI — the same total amount every month.',
   'EQI — the same total amount every 3 months.',
   'Equal Principal + Interest (Monthly or Quarterly) — pays the same chunk of the original loan each time, plus interest on what is left.',
-  'Interest & Principal (Separate Frequency) — interest and principal are paid on DIFFERENT months. For example, interest every month but principal only at the end of each quarter.',
+  'Separate Int./Prin. Frequency — interest and principal are paid on DIFFERENT months. For example, interest every month but principal only at the end of each quarter.',
 ];
 const MORATORIUM_Q = {
   h: 'Does the loan have a moratorium period?',
@@ -194,11 +194,11 @@ const MANUALS = {
           'EMI — the same total amount every month.',
           'EQI — the same total amount every 3 months.',
           'Equal Principal + Interest (Monthly or Quarterly) — pays the same chunk of the original loan each time, plus interest on what is left.',
-          'Interest & Principal (Separate Frequency) — interest and principal are paid on DIFFERENT months. For example, interest every month but principal only at the end of each quarter.',
+          'Separate Int./Prin. Frequency — interest and principal are paid on DIFFERENT months. For example, interest every month but principal only at the end of each quarter.',
         ],
       },
       {
-        h: 'Interest & Principal (Separate Frequency) — the extra boxes',
+        h: 'Separate Int./Prin. Frequency — the extra boxes',
         p: 'Pick this mode and three more boxes appear. Like every other mode, a rest period is set with Moratorium Period and its month boxes above; these three boxes decide what happens after it.',
         bullets: [
           'Interest Payment Frequency — how often interest is paid once the rest period is over: Monthly, Quarterly, Half-yearly or Yearly.',
@@ -240,7 +240,7 @@ const MANUALS = {
           'Each layer has a From month and a To month.',
           'Layers must line up neatly — no gaps and no overlaps. The system helps you keep them in order.',
           '“Customized Principal” lets you type exactly how much principal is paid each month in that range.',
-          '“Interest & Principal (Separate Frequency)” lets that range pay interest and principal on different months — pick the two frequencies in the Interest Freq. and Principal Freq. boxes on the layer. Custom Principal then means the amount paid on EACH principal date; leave it blank to split the balance evenly.',
+          '“Separate Int./Prin. Frequency” lets that range pay interest and principal on different months — pick the two frequencies in the Interest Freq. and Principal Freq. boxes on the layer. Custom Principal then means the amount paid on EACH principal date; leave it blank to split the balance evenly.',
           'A layer only shows the boxes its own style can use — an EMI layer has no frequency or Custom Principal boxes at all, because they would mean nothing there.',
           'On a narrow screen the table becomes one card per layer, with each box labelled down the side.',
         ],
@@ -268,7 +268,7 @@ const MANUALS = {
       ANSWERED_SECTION,
       { h: 'Moratorium Period (Months)', p: 'How many months the rest period lasts. It only appears when you said there IS a moratorium.' },
       IDP_SECTION,
-      { h: 'Payment Modality — chosen in step 1', p: 'Picked before you reached this form; use “Change” at the top to swap it. It sets how the borrower pays after the rest period — EMI (every month), EQI (every 3 months), Equal Principal + Interest, or “Interest & Principal (Separate Frequency)” when interest and principal fall on different months. Picking the last one adds the same two frequency boxes as on the new-loan form, counted from the month after the rest period; a rate change part-way through a month is split across that month by day count — the new rate then applies for the rest of the loan.' },
+      { h: 'Payment Modality — chosen in step 1', p: 'Picked before you reached this form; use “Change” at the top to swap it. It sets how the borrower pays after the rest period — EMI (every month), EQI (every 3 months), Equal Principal + Interest, or “Separate Int./Prin. Frequency” when interest and principal fall on different months. Picking the last one adds the same two frequency boxes as on the new-loan form, counted from the month after the rest period; a rate change part-way through a month is split across that month by day count — the new rate then applies for the rest of the loan.' },
       { h: 'Loan Tenor including Moratorium (Months)', p: 'The total months of the loan, counting the rest period.' },
       {
         h: 'Lending Rate Layers',

@@ -1,23 +1,23 @@
 // App controller: screen routing, theme, compare view
-import { el, openModal, closeModal, toast, optionField } from './components.js?v=20261101b';
+import { el, openModal, closeModal, toast, optionField } from './components.js?v=20261101g';
 import {
   renderRegularLoan, renderCustomizedLoan,
-  renderRateRevisionStructured, renderRateRevisionCustomized,
-} from './pages.js?v=20261101b';
-import { renderLanding, renderRevisionChoice, renderQuestions, answerSummary } from './screens.js?v=20261101b';
-import { listSummaries, deleteSummary } from './storage.js?v=20261101b';
-import { formatPercent, formatMoney, formatNumber } from './formatting.js?v=20261101b';
-import { openManual } from './manual.js?v=20261101b';
+  renderRateRevisionStructured, renderRateRevisionCustomized, PAGE_TITLES,
+} from './pages.js?v=20261101g';
+import { renderLanding, renderRevisionChoice, renderQuestions, answerSummary } from './screens.js?v=20261101g';
+import { listSummaries, deleteSummary } from './storage.js?v=20261101g';
+import { formatPercent, formatMoney, formatNumber } from './formatting.js?v=20261101g';
+import { openManual } from './manual.js?v=20261101g';
 
 const root = document.getElementById('app-root');
 const compareBtn = document.getElementById('compare-btn');
 
 // Keyed by pageType, which saved summaries and the user guide still key off.
 const TABS = {
-  regular: { label: 'Loan Facilities — Structured', render: renderRegularLoan, group: 'loan' },
-  customized: { label: 'Loan Facilities — Customized', render: renderCustomizedLoan, group: 'loan' },
-  revisionStructured: { label: 'Rate Revision — Structured', render: renderRateRevisionStructured, group: 'revision' },
-  revisionCustomized: { label: 'Rate Revision — Customized', render: renderRateRevisionCustomized, group: 'revision' },
+  regular: { label: PAGE_TITLES.regular, render: renderRegularLoan, group: 'loan' },
+  customized: { label: PAGE_TITLES.customized, render: renderCustomizedLoan, group: 'loan' },
+  revisionStructured: { label: PAGE_TITLES.revisionStructured, render: renderRateRevisionStructured, group: 'revision' },
+  revisionCustomized: { label: PAGE_TITLES.revisionCustomized, render: renderRateRevisionCustomized, group: 'revision' },
 };
 
 // module + mode -> which form to mount. The RM never sees these names; they are the answer

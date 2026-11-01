@@ -6,13 +6,14 @@
 // that with two modules and a handful of questions the RM can actually answer; the answers
 // decide which form they land on, and are carried into it so nothing is asked twice.
 // ============================================================
-import { el, optionField } from './components.js?v=20261101b';
+import { el, optionField } from './components.js?v=20261101g';
+import { SPLIT_MODE } from './calculations.js?v=20261101g';
 
 export const MODALITIES = [
   'EMI', 'EQI',
   'Equal Principal + Interest (Monthly)',
   'Equal Principal + Interest (Quarterly)',
-  'Interest & Principal (Separate Frequency)',
+  SPLIT_MODE,
 ];
 
 function choiceCard(title, blurb, onPick) {
