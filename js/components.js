@@ -1,5 +1,5 @@
 // Reusable UI component builders (returns DOM nodes)
-import { attachCommaFormatter, sanitizeDecimalString, formatTwoDecimalsOnBlur } from './formatting.js?v=20261101a';
+import { attachCommaFormatter, sanitizeDecimalString, formatTwoDecimalsOnBlur } from './formatting.js?v=20261101b';
 
 let uid = 0;
 const nextId = () => `f${++uid}`;
@@ -378,7 +378,7 @@ export function dateField({ label, name, placeholder = 'dd-Mmm-yyyy', tooltip = 
   field.getValue = () => {
     if (!input.value) return null;
     const d = parseDDMMMYYYY(input.value);
-    return d ? d.toISOString().slice(0, 10) : null;
+    return d ? dateToISO(d) : null;
   };
   field.setValue = (v) => {
     // Programmatic set — write the input directly (the picker reads it on open); no onChange.
@@ -398,15 +398,22 @@ export function isoToLocalDate(iso) {
   return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
 }
 
+// Typed or picked dates are LOCAL-midnight Dates on screen and plain 'YYYY-MM-DD' text everywhere
+// else. Both directions read the calendar parts in the same local clock (never via UTC), so the
+// day the user typed is the day that reaches the calculation, whatever the time zone.
 export function parseDDMMMYYYY(s) {
   if (!s) return null;
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) { const d = new Date(s); return isNaN(d) ? null : d; }
+  const iso = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
   const m = s.match(/^(\d{1,2})[-\s\/](\w{3})[-\s\/](\d{4})$/);
-  if (!m) { const d = new Date(s); return isNaN(d) ? null : d; }
+  if (!m) { const d = new Date(s); return isNaN(d) ? null : new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const mi = months.findIndex(x => x.toLowerCase() === m[2].toLowerCase());
   if (mi < 0) return null;
-  return new Date(Date.UTC(Number(m[3]), mi, Number(m[1])));
+  return new Date(Number(m[3]), mi, Number(m[1]));
+}
+export function dateToISO(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 export function formatDDMMMYYYY(d) {
   if (!d || isNaN(d)) return '';
@@ -687,7 +694,7 @@ export function layeredField(opts) {
     if (!v) return null;
     if (kind === 'date') {
       const d = parseDDMMMYYYY(v);
-      return d ? d.toISOString().slice(0, 10) : null;
+      return d ? dateToISO(d) : null;
     }
     return Number(v);
   }
@@ -704,9 +711,9 @@ export function layeredField(opts) {
   }
   function advanceOne(v, kind) {
     if (kind === 'date') {
-      const d = new Date(v);
+      const d = isoToLocalDate(v);
       d.setDate(d.getDate() + 1);
-      return d.toISOString().slice(0, 10);
+      return dateToISO(d);
     }
     return Number(v) + 1;
   }
@@ -821,7 +828,7 @@ export function layeredField(opts) {
         row[s.key] = raw === '' ? null : Number(raw);
       } else if (s.type === 'date') {
         const d = parseDDMMMYYYY(v);
-        row[s.key] = d ? d.toISOString().slice(0, 10) : null;
+        row[s.key] = d ? dateToISO(d) : null;
       } else row[s.key] = v || null;
     });
     return row;
@@ -1012,7 +1019,7 @@ export function securityLayersField({ label, name, help = '', getAnchor = null, 
   wrapper.setValue = (arr) => {
     data = (arr || []).map((item) => {
       const d = item.fromDate ? parseDDMMMYYYY(item.fromDate) : null;
-      const iso = d ? d.toISOString().slice(0, 10) : null;
+      const iso = d ? dateToISO(d) : null;
       let securities;
       if (Array.isArray(item.securities) && item.securities.length) securities = item.securities.map((s) => ({ amount: Number(s.amount) || 0, rate: Number(s.rate) || 0 }));
       else if (item.amount != null) securities = [{ amount: Number(item.amount) || 0, rate: Number(item.activeRate) || 0 }];
@@ -1134,7 +1141,7 @@ export function rateLayersField({ label, name, getAnchor = null, getMaturity = n
   wrapper.setValue = (arr) => {
     data = (arr || []).map((item) => {
       const d = item.fromDate ? parseDDMMMYYYY(item.fromDate) : null;
-      const iso = d ? d.toISOString().slice(0, 10) : null;
+      const iso = d ? dateToISO(d) : null;
       const rate = item.activeRate != null ? Number(item.activeRate) : (item.rate != null ? Number(item.rate) : null);
       return { fromDate: iso, rate };
     }).filter((r) => r.fromDate && r.rate != null);

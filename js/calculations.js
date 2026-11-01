@@ -714,15 +714,17 @@ export function computeMetrics(schedule, params) {
 // February occurs in the schedule, and a 31st due day falls on the 30th in 30-day months.
 // Always computed from the original anchor date, so the due day never drifts (after a
 // 28-Feb due the schedule returns to the 29th/30th/31st in March).
+// Plain calendar arithmetic on the anchor's year, month and day (an ISO string, or a Date at UTC
+// midnight): no clock or time zone is involved, so every browser gets the same dates. Returns a
+// Date at UTC midnight, which toISOString() turns back into exactly that day.
 export function addMonthsDue(d, m) {
-  const x = new Date(d);
-  const day = x.getDate();
-  x.setDate(1);
-  x.setMonth(x.getMonth() + m);
-  const lastDay = new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate();
-  const isFeb = x.getMonth() === 1;
-  x.setDate(isFeb && day >= 28 ? lastDay : Math.min(day, lastDay));
-  return x;
+  const [y0, m0, day] = typeof d === 'string'
+    ? d.slice(0, 10).split('-').map(Number)
+    : [d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()];
+  const t = m0 - 1 + m;
+  const y = y0 + Math.floor(t / 12), mo = t - Math.floor(t / 12) * 12;
+  const lastDay = new Date(Date.UTC(y, mo + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(y, mo, mo === 1 && day >= 28 ? lastDay : Math.min(day, lastDay)));
 }
 
 // Excel DAYS360 (US/NASD method): months are 30 days, years 360. Used for the day-count split

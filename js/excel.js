@@ -1,6 +1,6 @@
 // Excel / Word / PDF I/O via CDN libs
-import { formatMoney as fmtM, formatPercent as fmtP, formatRateLayers } from './formatting.js?v=20261101a';
-import { SPLIT_MODE, REFINANCE_RATE, REFINANCE_LENDING_RATE, REFINANCE_COF } from './calculations.js?v=20261101a';
+import { formatMoney as fmtM, formatPercent as fmtP, formatRateLayers } from './formatting.js?v=20261101b';
+import { SPLIT_MODE, REFINANCE_RATE, REFINANCE_LENDING_RATE, REFINANCE_COF } from './calculations.js?v=20261101b';
 
 // Funded Security as it READS on screen. The stored value is always "<kind> after Moratorium",
 // but on a loan with no moratorium the UI shows "<kind> Installment" — the workbook and the PDF
@@ -43,6 +43,31 @@ function numHi(v) {
   if (v === null || v === undefined || isNaN(v)) return 0;
   return Math.round(Number(v) * 1e8) / 1e8;
 }
+
+// Calendar date (YYYY-MM-DD) of a spreadsheet date cell, taken exactly as the file gives it.
+// Uploads are read with cellDates off, so a date cell arrives as Excel's own day number and
+// SSF.parse_date_code turns it into year/month/day by plain arithmetic. No clock or time zone
+// is involved at any step (reading them as JS Dates once moved every date a day earlier in
+// Dhaka). Text dates are read as written: 2023-01-10, 10-Jan-2023, or 10/01/2023 (day first).
+const MONTH_ABBR = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+function cellDateISO(v, date1904 = false) {
+  if (v === null || v === undefined || v === '') return null;
+  const iso = (y, m, d) => (y >= 1900 && m >= 1 && m <= 12 && d >= 1 && d <= 31
+    ? `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}` : null);
+  if (typeof v === 'number') {
+    const p = XLSX.SSF.parse_date_code(v, { date1904 });
+    return p ? iso(p.y, p.m, p.d) : null;
+  }
+  const s = String(v).trim();
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return iso(+m[1], +m[2], +m[3]);
+  m = s.match(/^(\d{1,2})[-\s/]([a-z]{3})[a-z]*[-\s/,]+(\d{4})$/i);
+  if (m) { const mi = MONTH_ABBR.indexOf(m[2].toLowerCase()); return mi < 0 ? null : iso(+m[3], mi + 1, +m[1]); }
+  m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
+  if (m) return iso(+m[3], +m[2], +m[1]);
+  return null;
+}
+const is1904 = (wb) => !!(wb.Workbook && wb.Workbook.WBProps && wb.Workbook.WBProps.date1904);
 
 // Format an ISO date (YYYY-MM-DD) as DD-Mmm-YYYY without timezone drift.
 function fmtDateDMY(iso) {
@@ -837,9 +862,9 @@ function downloadRevisionStructuredVerify(filename, ctx) {
   let chainPayXr = null, chainRate = null; // annuity chaining after a goal-sought split payment
   rows.forEach((r, i) => {
     const xr = i + 2, pr = xr - 1;
-    const d = new Date(r.date);
+    const [dy, dm, dd] = r.date.split('-').map(Number);
     setCell(ws, `A${xr}`, r.sl, { z: FMT.ACCOUNTING_INT, s: RR_STYLE.cell });
-    setCell(ws, `B${xr}`, 0, { f: `DATE(${d.getFullYear()},${d.getMonth() + 1},${d.getDate()})`, z: 'dd-mmm-yyyy', s: RR_STYLE.cell });
+    setCell(ws, `B${xr}`, 0, { f: `DATE(${dy},${dm},${dd})`, z: 'dd-mmm-yyyy', s: RR_STYLE.cell });
 
     if (i === 0) {
       ['C', 'D', 'E'].forEach(c => setCell(ws, `${c}${xr}`, 0, { z: FMT.ACCOUNTING }));
@@ -1030,8 +1055,8 @@ function downloadRevisionStructuredVerify(filename, ctx) {
     const r = 5 + i;
     setCell(wsI, `A${r}`, label, { text: true, s: RR_STYLE.cell });
     if (kind === 'date' && value) {
-      const dd = new Date(value);
-      setCell(wsI, `D${r}`, 0, { f: `DATE(${dd.getFullYear()},${dd.getMonth() + 1},${dd.getDate()})`, z: RR_FMT.DATE_LONG, s: RR_STYLE.cell });
+      const [dy, dm, dd] = String(value).slice(0, 10).split('-').map(Number);
+      setCell(wsI, `D${r}`, 0, { f: `DATE(${dy},${dm},${dd})`, z: RR_FMT.DATE_LONG, s: RR_STYLE.cell });
     } else if (kind === 'num') {
       setCell(wsI, `D${r}`, value, { z: RR_FMT.NUM2, s: RR_STYLE.cell });
     } else if (kind === 'int') {
@@ -1548,20 +1573,15 @@ export function readUploadedSchedule(file) {
     reader.onload = (e) => {
       try {
         const data = new Uint8Array(e.target.result);
-        const wb = XLSX.read(data, { type: 'array', cellDates: true });
+        const wb = XLSX.read(data, { type: 'array' });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(ws, { defval: null });
         const out = [];
         for (const r of rows) {
           const date = r['Date'] ?? r['date'];
           if (!date) continue;
-          let dateStr;
-          if (date instanceof Date) dateStr = date.toISOString().slice(0, 10);
-          else if (typeof date === 'string') {
-            const d = new Date(date);
-            if (isNaN(d)) continue;
-            dateStr = d.toISOString().slice(0, 10);
-          } else continue;
+          const dateStr = cellDateISO(date, is1904(wb));
+          if (!dateStr) continue;
           out.push({
             date: dateStr,
             installmentAmount: Number(r['Installment Amount'] ?? r['installment'] ?? 0) || 0,
@@ -1595,7 +1615,7 @@ export async function downloadCofSample() {
 // table (legend rows above the header are skipped). Returns [] if no COF column is found.
 // Rate column preference: exact "COF" (legacy template) → "Eligible COF" (current template,
 // the computed all-in rate the schedule uses) → any other header containing "COF".
-function parseCofGrid(ws) {
+function parseCofGrid(ws, date1904 = false) {
   const grid = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
   let headerRow = -1;
   for (let i = 0; i < grid.length; i++) {
@@ -1626,9 +1646,7 @@ function parseCofGrid(ws) {
       if (y && mo && da) iso = `${y}-${String(mo).padStart(2, '0')}-${String(da).padStart(2, '0')}`;
     }
     if (!iso && iDate >= 0 && row[iDate]) {
-      const dv = row[iDate];
-      const d = dv instanceof Date ? dv : new Date(dv);
-      if (!isNaN(d)) iso = d.toISOString().slice(0, 10);
+      iso = cellDateISO(row[iDate], date1904);
     }
     if (!iso) continue;
     // rate = Eligible COF (engine); cof/isc = raw inputs (verification sheet rebuilds Eligible = MAX(cof,isc)+0.3%).
@@ -1643,8 +1661,8 @@ export function readUploadedCof(file) {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: true });
-        const out = parseCofGrid(wb.Sheets[wb.SheetNames[0]]);
+        const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+        const out = parseCofGrid(wb.Sheets[wb.SheetNames[0]], is1904(wb));
         if (!out.length) return reject(new Error('No COF records found. Fill the Year/Month/Day and COF columns.'));
         resolve(out);
       } catch (err) { reject(err); }
@@ -1672,7 +1690,7 @@ export function readCustomizedRevisionFile(file) {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: true });
+        const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
         const byName = (re) => { const n = wb.SheetNames.find(nm => re.test(nm)); return n ? wb.Sheets[n] : null; };
         const hasHeader = (ws, h) => ((XLSX.utils.sheet_to_json(ws, { header: 1, defval: null })[0] || [])
           .map(c => String(c ?? '').trim().toLowerCase()).includes(h));
@@ -1685,9 +1703,8 @@ export function readCustomizedRevisionFile(file) {
         for (const r of json) {
           const date = r['Date'] ?? r['date'];
           if (!date) continue;
-          let dateStr;
-          if (date instanceof Date) dateStr = date.toISOString().slice(0, 10);
-          else { const d = new Date(date); if (isNaN(d)) continue; dateStr = d.toISOString().slice(0, 10); }
+          const dateStr = cellDateISO(date, is1904(wb));
+          if (!dateStr) continue;
           scheduleRows.push({
             date: dateStr,
             installmentAmount: numv(r['Installment Amount'] ?? r['Installment'] ?? r['installment']),
@@ -1698,7 +1715,7 @@ export function readCustomizedRevisionFile(file) {
         }
         if (scheduleRows.length < 2) return reject(new Error('The Schedule sheet needs a disbursement row + at least one installment row.'));
         const cofWs = byName(/cof/i);
-        const cofRows = cofWs ? parseCofGrid(cofWs) : [];
+        const cofRows = cofWs ? parseCofGrid(cofWs, is1904(wb)) : [];
         resolve({ scheduleRows, cofRows });
       } catch (err) { reject(err); }
     };

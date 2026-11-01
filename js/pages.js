@@ -3,23 +3,23 @@ import {
   el, numberField, percentField, optionField, dateField, textField,
   monthBoxesField, layeredField, securityLayersField, rateLayersField, monthRateLayersField, toast, parseDDMMMYYYY, formatDDMMMYYYY,
   openModal, closeModal,
-} from './components.js?v=20261101a';
-import { isoToDDMMMYYYY } from './formatting.js?v=20261101a';
+} from './components.js?v=20261101b';
+import { isoToDDMMMYYYY } from './formatting.js?v=20261101b';
 import {
   buildStructuredSchedule, buildCustomizedSchedule,
   buildRateRevisionStructured, computeMetrics,
   buildSplitSchedule, principalPaymentMonths, SPLIT_MODE, FREQ, FREQ_NAMES,
   computeRevisionMetrics, computeRevisionCustomizedMetrics, buildCofData,
   addMonthsDue, COMMERCIAL_RATE, REFINANCE_RATE, REFINANCE_LENDING_RATE,
-} from './calculations.js?v=20261101a';
-import { formatMoney, formatPercent, formatNumber, formatRateLayers } from './formatting.js?v=20261101a';
-import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20261101a';
+} from './calculations.js?v=20261101b';
+import { formatMoney, formatPercent, formatNumber, formatRateLayers } from './formatting.js?v=20261101b';
+import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20261101b';
 import {
   downloadScheduleAsExcel, downloadSampleAmortization, readUploadedSchedule,
   downloadScheduleAsWord, downloadScheduleAsPDF, downloadVerificationExcel, downloadReportPDF,
   downloadCofSample, readUploadedCof,
   downloadCustomizedRevisionSample, readCustomizedRevisionFile,
-} from './excel.js?v=20261101a';
+} from './excel.js?v=20261101b';
 
 // Cached page state by tab key (also persisted via storage saveDraft)
 const tabState = {};
@@ -237,6 +237,10 @@ export function renderRegularLoan(root, pre = null) {
   // the schedule always amortises to zero however the earlier boxes are filled.
   const customWrap = el('div', { class: 'sub-card hidden' });
   const customBoxes = [];
+  // What the RM typed, keyed by payment month. Nearly every change on the form re-runs refresh(),
+  // which rebuilds these boxes — without this they came back empty each time (picking a Funded
+  // Security Type after typing the amounts wiped them).
+  const customTyped = new Map();
   function rebuildCustomBoxes() {
     const months = splitPrincipalMonths();
     customWrap.innerHTML = '';
@@ -252,7 +256,8 @@ export function renderRegularLoan(root, pre = null) {
         f.input.classList.add('readonly');
         f.setLabel(`Month ${String(m).padStart(2, '0')} (remainder)`);
       } else {
-        f.input.addEventListener('input', updateCustomRemainder);
+        if (customTyped.has(m)) f.setValue(customTyped.get(m));
+        f.input.addEventListener('input', () => { customTyped.set(m, f.getValue()); updateCustomRemainder(); });
       }
       customBoxes.push(f);
       gridEl.appendChild(f);
@@ -866,6 +871,8 @@ export function renderRateRevisionStructured(root, pre = null) {
   }
   const rrCustomWrap = el('div', { class: 'sub-card hidden' });
   const rrCustomBoxes = [];
+  // Typed amounts by payment month, so a rebuild (any refresh) keeps them — as on Loan Facilities.
+  const rrCustomTyped = new Map();
   function rrRebuildCustom() {
     const months = rrPrincipalMonths();
     rrCustomWrap.innerHTML = ''; rrCustomBoxes.length = 0;
@@ -876,7 +883,10 @@ export function renderRateRevisionStructured(root, pre = null) {
       const last = i === months.length - 1;
       const f = numberField({ label: `Month ${String(mth).padStart(2, '0')}`, name: `rrcp${mth}` });
       if (last) { f.input.readOnly = true; f.input.classList.add('readonly'); f.setLabel(`Month ${String(mth).padStart(2, '0')} (remainder)`); }
-      else f.input.addEventListener('input', rrUpdateRemainder);
+      else {
+        if (rrCustomTyped.has(mth)) f.setValue(rrCustomTyped.get(mth));
+        f.input.addEventListener('input', () => { rrCustomTyped.set(mth, f.getValue()); rrUpdateRemainder(); });
+      }
       rrCustomBoxes.push(f); g.appendChild(f);
     });
     rrCustomWrap.appendChild(g);
@@ -908,7 +918,7 @@ export function renderRateRevisionStructured(root, pre = null) {
     // Month-t due date per the due-day convention (Feb -> last day for 28th-31st
     // anchors; no rollover into March), then one day back.
     const dt = addMonthsDue(d, t);
-    dt.setDate(dt.getDate() - 1);
+    dt.setUTCDate(dt.getUTCDate() - 1);
     return dt.toISOString().slice(0, 10);
   }
 
@@ -1016,7 +1026,7 @@ export function renderRateRevisionStructured(root, pre = null) {
     const inputs = collectRevisionStructuredInputs(fields);
     if (!inputs.initialAmount) return stop('Enter Initial Loan Amount.');
     if (!inputs.disbursementDate) return stop('Enter Disbursement Date.');
-    const dow = new Date(inputs.disbursementDate).getDay();
+    const dow = new Date(inputs.disbursementDate).getUTCDay();
     if (dow === 5 || dow === 6) return stop('Disbursement Date cannot be Friday or Saturday.');
     if (!inputs.tenorMonths) return stop('Enter Loan Tenor.');
     if (!inputs.paymentModality) return stop('Select a Payment Modality.');
