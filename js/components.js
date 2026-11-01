@@ -1,5 +1,5 @@
 // Reusable UI component builders (returns DOM nodes)
-import { attachCommaFormatter, sanitizeDecimalString, formatTwoDecimalsOnBlur } from './formatting.js?v=20261101k';
+import { attachCommaFormatter, sanitizeDecimalString, formatTwoDecimalsOnBlur } from './formatting.js?v=20261102a';
 
 let uid = 0;
 const nextId = () => `f${++uid}`;
@@ -893,10 +893,16 @@ function confirmOverlay(message, { yesLabel = 'Yes', noLabel = 'No, go back', da
 // several). Save & Cancel each ask for a re-confirmation. getValue() returns each row as
 // { fromDate, amount, activeRate, securities[] } — amount/activeRate feed the engine unchanged
 // (combined per date); securities[] carries the breakdown for the Verify Excel.
-export function securityLayersField({ label, name, help = '', getAnchor = null, getMaturity = null }) {
-  let data = []; // [{ fromDate: ISO|null, securities: [{ amount:Number, rate:Number(decimal) }] }]
+export function securityLayersField({ label, name, help = '', getAnchor = null, getMaturity = null, getNewInstallment = null }) {
+  let data = []; // [{ fromDate: ISO|null, securities: [{ amount:Number, rate:Number(decimal), newInst?:true }] }]
   const money2 = (n) => (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const rowTotal = (r) => (r.securities || []).reduce((s, x) => s + (Number(x.amount) || 0), 0);
+  // A security marked "New Installment" (newInst) is worth the first installment after its row's
+  // From Date — the new installment once the rate is revised on that date. The page works it out
+  // from the schedule: getNewInstallment(date) while the popup is open, resolveNewInstallments()
+  // on every recalculation. Until the schedule can be built, its amount is pending.
+  const hasLinked = (r) => (r.securities || []).some((x) => x.newInst);
+  const isPending = (r) => (r.securities || []).some((x) => x.newInst && !(Number(x.amount) > 0));
   const rowRate = (r) => {
     const tot = rowTotal(r);
     if (tot <= 0) return 0;
@@ -937,7 +943,8 @@ export function securityLayersField({ label, name, help = '', getAnchor = null, 
       tableWrap.appendChild(el('div', { class: 'sec-row' },
         el('div', { class: 'sec-vals' },
           el('div', {}, dmy(r.fromDate)),
-          el('div', {}, money2(rowTotal(r))),
+          el('div', {}, isPending(r) ? 'New installment pending' : money2(rowTotal(r)),
+            hasLinked(r) && !isPending(r) ? el('span', { class: 'sec-note' }, 'incl. New Installment') : null),
           el('div', {}, (rowRate(r) * 100).toFixed(2) + '%')),
         el('div', { class: 'sec-acts' }, editBtn, delBtn)));
     });
@@ -950,7 +957,10 @@ export function securityLayersField({ label, name, help = '', getAnchor = null, 
     if (isNew && !work.fromDate && data.length === 0 && getAnchor) { const a = getAnchor(); if (a && a.value) work.fromDate = a.value; }
     if (!work.securities.length) work.securities.push({ amount: null, rate: null });
 
-    const dateF = dateField({ label: 'From Date', name: 'secFromDate' });
+    // A changed From Date moves every "New Installment" amount to the installment after it.
+    const refillLinked = () => entryRows.forEach((r) => { if (r.newInst) r.setLinked(true); });
+    const dateF = dateField({ label: 'From Date', name: 'secFromDate', onChange: () => refillLinked() });
+    dateF.input.addEventListener('change', () => refillLinked());
     if (work.fromDate) dateF.setValue(work.fromDate);
 
     const entriesWrap = el('div', { class: 'sec-entries' });
@@ -961,8 +971,28 @@ export function securityLayersField({ label, name, help = '', getAnchor = null, 
       const rate = percentField({ label: 'Interest Rate', name: 'rate' });
       if (values.rate != null) rate.setValue(values.rate);
       const rm = el('button', { type: 'button', class: 'row-del', title: 'Remove this security' }, '×');
-      const rowEl = el('div', { class: 'sec-entry' }, amt, rate, rm);
-      const api = { amt, rate, rowEl };
+      const api = { amt, rate, newInst: false };
+      let amtCell = amt;
+      if (getNewInstallment) {
+        // Fills the amount with the first installment after the From Date and keeps it there.
+        // Typing an amount of your own ends the link; pressing the button again restores it.
+        const niBtn = el('button', { type: 'button', class: 'sec-ni-btn', title: 'Use the first installment after the From Date' }, 'New Installment');
+        const niNote = el('div', { class: 'help sec-ni-note' });
+        api.setLinked = (on) => {
+          api.newInst = on;
+          niBtn.classList.toggle('on', on);
+          if (!on) { niNote.textContent = ''; return; }
+          const v = getNewInstallment(dateF.getValue());
+          amt.setValue(v ? v.amount : null);
+          niNote.textContent = v ? `= installment of ${dmy(v.date)}` : 'Fills in once the schedule can be worked out.';
+        };
+        niBtn.addEventListener('click', () => api.setLinked(true));
+        amt.input.addEventListener('input', () => { if (api.newInst) api.setLinked(false); });
+        amtCell = el('div', { class: 'sec-amt' }, amt, el('div', { class: 'sec-ni' }, niBtn, niNote));
+        if (values.newInst) api.setLinked(true);
+      }
+      const rowEl = el('div', { class: 'sec-entry' }, amtCell, rate, rm);
+      api.rowEl = rowEl;
       rm.addEventListener('click', () => {
         if (entryRows.length <= 1) { toast('Keep at least one security, or use Cancel.', 'warn'); return; }
         const k = entryRows.indexOf(api); if (k >= 0) { entryRows.splice(k, 1); rowEl.remove(); }
@@ -981,8 +1011,9 @@ export function securityLayersField({ label, name, help = '', getAnchor = null, 
       { yesLabel: 'Yes, discard', danger: true, onYes: closeEditor }));
     saveBtn.addEventListener('click', () => {
       const fromDate = dateF.getValue();
-      const securities = entryRows.map((r) => ({ amount: r.amt.getValue(), rate: r.rate.getValue() }))
-        .filter((s) => s.amount != null && s.amount > 0);
+      // A "New Installment" security may still be waiting for its amount — it is kept anyway.
+      const securities = entryRows.map((r) => ({ amount: r.amt.getValue(), rate: r.rate.getValue(), ...(r.newInst ? { newInst: true } : {}) }))
+        .filter((s) => s.newInst || (s.amount != null && s.amount > 0));
       if (!fromDate) return toast('Enter the From Date.', 'error');
       if (!securities.length) return toast('Add at least one security with an outstanding amount.', 'error');
       if (securities.some((s) => s.rate == null)) return toast('Enter an interest rate for every security.', 'error');
@@ -1000,7 +1031,8 @@ export function securityLayersField({ label, name, help = '', getAnchor = null, 
 
     const card = el('div', { class: 'sec-edit' },
       el('div', { class: 'sec-edit-head' }, el('h3', {}, isNew ? 'Add Loan Security' : 'Edit Loan Security')),
-      el('p', { class: 'help' }, 'Choose the date this security applies from, then add one or more securities (amount + rate) for that date.'),
+      el('p', { class: 'help' }, 'Choose the date this security applies from, then add one or more securities (amount + rate) for that date.'
+        + (getNewInstallment ? ' “New Installment” makes a security equal to the first installment after that date.' : '')),
       el('div', { class: 'sec-edit-date' }, dateF),
       el('div', { class: 'sec-entry sec-entry-head' }, el('div', {}, 'Outstanding Amount'), el('div', {}, 'Interest Rate'), el('div', {}, '')),
       entriesWrap, addEntry,
@@ -1010,23 +1042,40 @@ export function securityLayersField({ label, name, help = '', getAnchor = null, 
     const mc = document.getElementById('modal-card'); if (mc) mc.classList.add('modal-card--sec');
   }
 
+  const kept = (s) => Number(s.amount) > 0 || s.newInst;
   wrapper.getValue = () => data
-    .filter((r) => r.fromDate && (r.securities || []).some((s) => Number(s.amount) > 0))
+    .filter((r) => r.fromDate && (r.securities || []).some(kept))
     .map((r) => ({
       fromDate: r.fromDate, amount: rowTotal(r), activeRate: rowRate(r),
-      securities: (r.securities || []).filter((s) => Number(s.amount) > 0).map((s) => ({ amount: Number(s.amount), rate: Number(s.rate) })),
+      securities: (r.securities || []).filter(kept).map((s) => ({
+        amount: Number(s.amount) || 0, rate: Number(s.rate),
+        ...(s.newInst ? { newInst: true, instSl: s.instSl ?? null, instDate: s.instDate ?? null } : {}),
+      })),
     }));
   wrapper.setValue = (arr) => {
     data = (arr || []).map((item) => {
       const d = item.fromDate ? parseDDMMMYYYY(item.fromDate) : null;
       const iso = d ? dateToISO(d) : null;
       let securities;
-      if (Array.isArray(item.securities) && item.securities.length) securities = item.securities.map((s) => ({ amount: Number(s.amount) || 0, rate: Number(s.rate) || 0 }));
+      if (Array.isArray(item.securities) && item.securities.length) securities = item.securities.map((s) => ({
+        amount: Number(s.amount) || 0, rate: Number(s.rate) || 0, ...(s.newInst ? { newInst: true } : {}) }));
       else if (item.amount != null) securities = [{ amount: Number(item.amount) || 0, rate: Number(item.activeRate) || 0 }];
       else securities = [];
       return { fromDate: iso, securities };
     }).filter((r) => r.securities.length);
     render();
+  };
+  // instAfter(date) -> { amount, sl, date } | null, from the page's current schedule. Amounts that
+  // moved are stored and the table redrawn — quietly, as this runs inside the live recalculation.
+  wrapper.resolveNewInstallments = (instAfter) => {
+    let moved = false;
+    data.forEach((r) => (r.securities || []).forEach((x) => {
+      if (!x.newInst) return;
+      const v = r.fromDate ? instAfter(r.fromDate) : null;
+      const next = { amount: v ? v.amount : null, instSl: v ? v.sl : null, instDate: v ? v.date : null };
+      if (next.amount !== x.amount || next.instSl !== x.instSl) { Object.assign(x, next); moved = true; }
+    }));
+    if (moved) render();
   };
   wrapper.applyLayerRules = () => render();
   render();

@@ -3,23 +3,23 @@ import {
   el, numberField, percentField, optionField, dateField, textField,
   monthBoxesField, layeredField, securityLayersField, rateLayersField, monthRateLayersField, toast, parseDDMMMYYYY, formatDDMMMYYYY,
   openModal, closeModal,
-} from './components.js?v=20261101k';
-import { isoToDDMMMYYYY } from './formatting.js?v=20261101k';
+} from './components.js?v=20261102a';
+import { isoToDDMMMYYYY } from './formatting.js?v=20261102a';
 import {
   buildStructuredSchedule, buildCustomizedSchedule,
   buildRateRevisionStructured, computeMetrics,
   buildSplitSchedule, principalPaymentMonths, SPLIT_MODE, FREQ, FREQ_NAMES,
   computeRevisionMetrics, computeRevisionCustomizedMetrics, buildCofData,
   addMonthsDue, COMMERCIAL_RATE, REFINANCE_RATE, REFINANCE_LENDING_RATE,
-} from './calculations.js?v=20261101k';
-import { formatMoney, formatPercent, formatNumber, formatRateLayers } from './formatting.js?v=20261101k';
-import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20261101k';
+} from './calculations.js?v=20261102a';
+import { formatMoney, formatPercent, formatNumber, formatRateLayers } from './formatting.js?v=20261102a';
+import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20261102a';
 import {
   downloadScheduleAsExcel, downloadSampleAmortization, readUploadedSchedule,
   downloadScheduleAsWord, downloadScheduleAsPDF, downloadVerificationExcel,
   downloadCofSample, readUploadedCof,
   downloadCustomizedRevisionSample, readCustomizedRevisionFile,
-} from './excel.js?v=20261101k';
+} from './excel.js?v=20261102a';
 
 // Cached page state by tab key (also persisted via storage saveDraft)
 const tabState = {};
@@ -964,6 +964,12 @@ export function renderRateRevisionStructured(root, pre = null) {
     name: 'securityLayers',
     getAnchor: () => ({ value: disbursementDate.getValue() }),
     getMaturity: () => maturityISO(),
+    // A "New Installment" security: the first installment after a date, from the schedule as the
+    // form stands now (null while the form cannot build one yet).
+    getNewInstallment: (iso) => {
+      const basis = iso ? scheduleBasis(collectRevisionStructuredInputs(fields)) : {};
+      return basis.params ? firstInstallmentAfter(buildRateRevisionStructured(basis.params).rows, iso) : null;
+    },
   });
 
   // External inputs (disbursement / tenor) feed the cascade engine — re-run on change.
@@ -1045,11 +1051,13 @@ export function renderRateRevisionStructured(root, pre = null) {
   setTimeout(() => { rateLayers.applyLayerRules(); securityLayers.applyLayerRules(); }, 150);
   attachDraftAutosave('revisionStructured', section, () => collectRevisionStructuredInputs(fields));
 
-  function compute() {
+  // What a schedule needs, once the form has it: { params } — or { msg } saying what is missing.
+  // The loan security and the COF are left out: they never change an installment, so a "New
+  // Installment" security can be worked out before the COF file is uploaded.
+  function scheduleBasis(inputs) {
     // Every guard below used to be a toast fired by the Calculate button. Live, they become
     // the line shown in the results pane instead.
     const stop = (msg) => ({ msg });
-    const inputs = collectRevisionStructuredInputs(fields);
     if (!inputs.initialAmount) return stop('Enter Initial Loan Amount.');
     if (!inputs.disbursementDate) return stop('Enter Disbursement Date.');
     const dow = new Date(inputs.disbursementDate).getUTCDay();
@@ -1078,15 +1086,6 @@ export function renderRateRevisionStructured(root, pre = null) {
     const mat = maturityISO();
     const lastRateFrom = inputs.rateLayers[inputs.rateLayers.length - 1].fromDate;
     if (lastRateFrom && mat && lastRateFrom >= mat) return stop(`The last Lending Rate Layer's From Date (${lastRateFrom}) must be earlier than loan maturity (${mat}).`);
-    if (inputs.securityLayers.length) {
-      const lastSecFrom = inputs.securityLayers[inputs.securityLayers.length - 1].fromDate;
-      if (lastSecFrom && mat && lastSecFrom >= mat) return stop(`The last Loan Security Layer's From Date (${lastSecFrom}) must be earlier than loan maturity (${mat}).`);
-    }
-
-    // Build COF effective-date data from the uploaded file (cut at maturity). COF must cover from
-    // the disbursement date — otherwise ERR is not calculated and a blocking popup is shown.
-    const { cofData } = buildCofData(cofUpload.getRows(), inputs.disbursementDate, mat);
-    if (!cofCoversDisbursement(cofData, inputs.disbursementDate)) return stop(COF_GAP_MSG);
 
     const params = {
       initialLoanAmount: inputs.initialAmount,
@@ -1097,8 +1096,8 @@ export function renderRateRevisionStructured(root, pre = null) {
       paymentModality: inputs.paymentModality,
       tenorMonths: inputs.tenorMonths,
       rateLayers: inputs.rateLayers,
-      securityLayers: inputs.securityLayers,
-      cofData,
+      securityLayers: [],
+      cofData: [],
       maturityDate: mat,
     };
     if (rrSplit) {
@@ -1109,6 +1108,36 @@ export function renderRateRevisionStructured(root, pre = null) {
         customPrincipals: inputs.rrCustomPrincipals,
       });
     }
+    return { params };
+  }
+
+  function compute() {
+    const stop = (msg) => ({ msg });
+    const inputs = collectRevisionStructuredInputs(fields);
+    const basis = scheduleBasis(inputs);
+    if (!basis.params) return basis;
+    const mat = basis.params.maturityDate;
+    // "New Installment" securities take the first installment after their From Date; the layers
+    // are read again once those amounts are settled.
+    let plain = null;
+    securityLayers.resolveNewInstallments((iso) => {
+      plain = plain || buildRateRevisionStructured(basis.params);
+      return firstInstallmentAfter(plain.rows, iso);
+    });
+    inputs.securityLayers = collectRevisionStructuredInputs(fields).securityLayers;
+    const waiting = inputs.securityLayers.find((l) => l.securities.some((x) => x.newInst && !x.amount));
+    if (waiting) return stop(`Loan Security from ${isoToDDMMMYYYY(waiting.fromDate)}: no installment falls after that date, so its New Installment amount cannot be worked out.`);
+    if (inputs.securityLayers.length) {
+      const lastSecFrom = inputs.securityLayers[inputs.securityLayers.length - 1].fromDate;
+      if (lastSecFrom && mat && lastSecFrom >= mat) return stop(`The last Loan Security Layer's From Date (${lastSecFrom}) must be earlier than loan maturity (${mat}).`);
+    }
+
+    // Build COF effective-date data from the uploaded file (cut at maturity). COF must cover from
+    // the disbursement date — otherwise ERR is not calculated and a blocking popup is shown.
+    const { cofData } = buildCofData(cofUpload.getRows(), inputs.disbursementDate, mat);
+    if (!cofCoversDisbursement(cofData, inputs.disbursementDate)) return stop(COF_GAP_MSG);
+
+    const params = { ...basis.params, securityLayers: inputs.securityLayers, cofData };
     const schedule = buildRateRevisionStructured(params);
     const metrics = computeRevisionMetrics(schedule);
     const ctx = { pageType: 'revisionStructured', pageTitle: PAGE_TITLES.revisionStructured,
@@ -1129,7 +1158,8 @@ function collectRevisionStructuredInputs(f) {
     paymentModality: f.paymentModality.getValue(),
     tenorMonths: f.tenorMonths.getValue(),
     rateLayers: f.rateLayers.getValue().filter(r => r.fromDate && r.activeRate !== null),
-    securityLayers: f.securityLayers.getValue().filter(r => r.fromDate && r.amount),
+    // A layer whose only security is a "New Installment" still waiting for its amount is kept.
+    securityLayers: f.securityLayers.getValue().filter(r => r.fromDate && (r.amount || r.securities.some(x => x.newInst))),
     reference: f.referenceField ? f.referenceField.getValue() : '',
     // Split interest/principal modality
     rrIntFreq: f.rrIntFreq ? f.rrIntFreq.getValue() : null,
@@ -1301,6 +1331,13 @@ function attachLiveRecalc(sectionEl, panel, compute) {
   sectionEl.addEventListener('change', schedule);
   run();
   return run;
+}
+
+// What a "New Installment" security is worth: the first installment after `iso` that repays
+// principal (so a moratorium's interest-only months are skipped), to the cent, and its row.
+function firstInstallmentAfter(rows, iso) {
+  const r = rows.find((x) => x.sl > 0 && x.date > iso && x.principal > 0);
+  return r ? { amount: Math.round(r.installment * 100) / 100, sl: r.sl, date: r.date } : null;
 }
 
 function pageTitle(text) {

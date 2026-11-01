@@ -355,14 +355,15 @@ export function buildCustomizedSchedule(p) {
   // E.g. if moratorium=6 and tenor=36, layers have from=7, to=36
   const sorted = layers.slice().sort((a, b) => (a.fromInstallment ?? 0) - (b.fromInstallment ?? 0));
 
-  // Track per-layer base installment for security-size lookup
-  const layerInstallments = {}; // { 'EMI': base_pmt, 'EQI': base_pmt, ... }
+  // The "Installment" funded security is sized on the first ACTUAL installment of the first
+  // Equal Principal layer — its principal + interest, without any moratorium interest that
+  // rides on it — as the one-style form sizes it on its first installment (user, 02-Nov-2026).
+  let baseInstallment = 0;
 
   for (let li = 0; li < sorted.length; li++) {
     const L = sorted[li];
     const from = L.fromInstallment;
     const to = L.toInstallment;
-    const count = to - from + 1;
     const isLastLayer = (li === sorted.length - 1);
 
     // ---- Split interest/principal layer ----------------------------------------------
@@ -449,14 +450,6 @@ export function buildCustomizedSchedule(p) {
       // the next layer (matching the Equal-Principal layer behaviour). Leftover months round
       // the period count UP — see periodsToCover.
       pmt = PMT(layerRate * ppm / 12, periodsToCover(from, tenorMonths, ppm), -urpa);
-      if (!layerInstallments[L.paymentType]) layerInstallments[L.paymentType] = pmt;
-    } else if (L.paymentType === 'Equal Principal + Interest (Monthly)' && !layerInstallments['Installment']) {
-      layerInstallments['Installment'] = (urpa / count) + urpa * (layerRate / 12);
-    } else if (L.paymentType === 'Equal Principal + Interest (Quarterly)' && !layerInstallments['Installment']) {
-      const qPeriods = periodsToCover(from, to, 3);
-      layerInstallments['Installment'] = (urpa / qPeriods) + urpa * (layerRate / 4);
-    } else if (L.paymentType && L.paymentType.startsWith('Customized Principal') && !layerInstallments['Customized']) {
-      layerInstallments['Customized'] = (L.customPrincipal || 0) + urpa * (layerRate / 12);
     }
 
     let paymentCounter = 0;
@@ -486,6 +479,7 @@ export function buildCustomizedSchedule(p) {
         } else if (ptype.startsWith('Equal Principal + Interest')) {
           principal = Math.min(epiConstPrincipal, urpa);
           installment = principal + interest;
+          if (!baseInstallment) baseInstallment = installment;
         } else if (ptype.startsWith('Customized Principal')) {
           principal = Math.min(L.customPrincipal || 0, urpa);
           installment = principal + interest;
@@ -519,7 +513,7 @@ export function buildCustomizedSchedule(p) {
   }
   applyIntExpenseAccrual(rows, monthlyCof, rb.layered ? (i) => rb.cof(i) / 12 : null);
   if (rb.layered) rows.forEach((r) => { if (r.sl > 0) { r.rate = rb.rate(r.sl); r.cof = rb.cof(r.sl); } });
-  return { rows, accruedReceivable, layerInstallments, capitalizedPrincipal };
+  return { rows, accruedReceivable, baseInstallment, capitalizedPrincipal };
 }
 
 // ============================================================
@@ -635,8 +629,9 @@ export function computeMetrics(schedule, params) {
   // Installment-equivalent funded security.
   //   "EMI after Moratorium" = PMT(rate/12, regularMonths, -loan)   (B14 in the sample)
   //   "EQI after Moratorium" = PMT(rate/4,  regularQuarters, -loan)
-  //   "Installment"          = the post-moratorium Equal-Principal installment (baseInstallment)
-  // These are the hypothetical EMI/EQI size after moratorium, independent of the actual layers.
+  //   "Installment"          = the first Equal-Principal installment (baseInstallment) — on payment
+  //                            layers, the first actual one of the first Equal Principal layer
+  // EMI/EQI are the hypothetical size after the moratorium, independent of the actual layers.
   const kind = String(securityKind || '');
   const regularMonths = Math.max(0, tenorMonths - moratoriumMonths);
   // When moratorium interest is capitalized the post-moratorium principal is larger,
@@ -653,20 +648,8 @@ export function computeMetrics(schedule, params) {
       const q = Math.max(1, Math.round(regularMonths / 3));
       unitInstallment = PMT(sizingRate / 4, q, -basePrincipal);
     } else if (schedule.baseInstallment) {
-      // Structured Equal-Principal: first installment size
+      // Equal Principal (one style, or the first Equal Principal layer): its first installment
       unitInstallment = schedule.baseInstallment;
-    } else if (Array.isArray(params.layers) && regularMonths > 0) {
-      // Payment layers: sized like EMI/EQI above, independent of the layers — the first
-      // installment if everything after the moratorium were paid like the first Equal Principal
-      // layer (principal ÷ installments + that period's interest), exactly as the one-style form.
-      const ep = params.layers.find(L => String(L.paymentType || '').startsWith('Equal Principal'));
-      if (ep) {
-        const step = ep.paymentType.endsWith('(Quarterly)') ? 3 : 1;
-        const firstInterest = rb.layered
-          ? basePrincipal * rb.factor(moratoriumMonths + 1, moratoriumMonths + step)
-          : basePrincipal * sizingRate * step / 12;
-        unitInstallment = basePrincipal / Math.ceil(regularMonths / step) + firstInterest;
-      }
     }
     securityAmount = unitInstallment * (numInst || 1);
     // securityRate keeps the passed value — the "Funded Security Rate" for EMI/EQI after

@@ -1,6 +1,6 @@
 // Excel / Word / PDF I/O via CDN libs
-import { formatMoney as fmtM, formatPercent as fmtP } from './formatting.js?v=20261101k';
-import { SPLIT_MODE, REFINANCE_RATE, REFINANCE_LENDING_RATE, REFINANCE_COF } from './calculations.js?v=20261101k';
+import { formatMoney as fmtM, formatPercent as fmtP } from './formatting.js?v=20261102a';
+import { SPLIT_MODE, REFINANCE_RATE, REFINANCE_LENDING_RATE, REFINANCE_COF } from './calculations.js?v=20261102a';
 
 // Funded Security as it READS on screen. The stored value is always "<kind> after Moratorium",
 // but on a loan with no moratorium the UI shows "<kind> Installment" — the workbook quotes the
@@ -322,7 +322,7 @@ const README_SHEETS = {
   Rate_Security_COF_Layers: 'The rate, loan security and cost-of-fund tables by date. Each Schedule row looks up the rate, security and COF in force on its date here.',
   Schedule: 'The schedule, one row per month. Each row starts from the balance in the row above.',
 };
-function buildReadMeSheet(sheetNames, pageType) {
+function buildReadMeSheet(sheetNames, pageType, notes = {}) {
   const ws = {};
   let r = 1;
   const put = (a, b, sA = null, sB = null) => {
@@ -355,6 +355,9 @@ function buildReadMeSheet(sheetNames, pageType) {
     put('Average Portfolio', 'The average of the balances at the start of each month.');
     put('NIM', 'Net Interest Income ÷ Average Portfolio ÷ the loan\'s length in years.');
     put('ERR', 'COF + NIM. Where the COF changes during the loan, the COF part is the Effective COF: Interest Expense ÷ Average Portfolio ÷ the loan\'s length in years.');
+    if (notes.newInstallment) {
+      put('New Installment security', 'Worth the first installment after its From Date, to the cent: in the Loan Security — Breakdown table it is a formula on that Schedule row, so it always equals the installment shown there, and its layer\'s Amount and Active Rate add up the breakdown.');
+    }
   }
   section('Checking a number');
   put('See a formula', 'Click any white cell; the formula shows in the bar above the sheet.');
@@ -371,9 +374,9 @@ function buildReadMeSheet(sheetNames, pageType) {
 // accident (columns and rows still resize; Review → Unprotect Sheet needs no password). The style
 // writer cannot mark a cell unlocked, so the finished file is opened once more and every cell
 // style that carries the typed fill gets <protection locked="0"/>.
-function writeVerificationWorkbook(wb, filename, pageType) {
+function writeVerificationWorkbook(wb, filename, pageType, notes = {}) {
   wb.SheetNames.forEach((n) => colourTypedCells(wb.Sheets[n]));
-  XLSX.utils.book_append_sheet(wb, buildReadMeSheet([...wb.SheetNames], pageType), 'Read Me');
+  XLSX.utils.book_append_sheet(wb, buildReadMeSheet([...wb.SheetNames], pageType, notes), 'Read Me');
   wb.SheetNames.forEach((n) => { wb.Sheets[n]['!protect'] = { formatColumns: false, formatRows: false }; });
   const zip = XLSX.CFB.read(new Uint8Array(XLSX.write(wb, { bookType: 'xlsx', type: 'array', cellStyles: true })), { type: 'array' });
   const styles = zip.FileIndex[zip.FullPaths.findIndex(p => /\/xl\/styles\.xml$/i.test(p))];
@@ -1246,7 +1249,8 @@ function downloadRevisionStructuredVerify(filename, ctx) {
   XLSX.utils.book_append_sheet(wb, wsI, 'Inputs & Results');
   XLSX.utils.book_append_sheet(wb, wsL, 'Rate_Security_COF_Layers');
   XLSX.utils.book_append_sheet(wb, ws, 'Schedule');
-  writeVerificationWorkbook(wb, filename, 'revisionStructured');
+  const newInstallment = securityLayers.some((l) => (l.securities || []).some((x) => x.newInst));
+  writeVerificationWorkbook(wb, filename, 'revisionStructured', { newInstallment });
 }
 
 // Build the Rate_Security_COF_Layers worksheet. Three side-by-side tables; the Schedule
@@ -1278,6 +1282,12 @@ function buildLayersSheet(rateLayers, securityLayers, cofRecs, includeLending = 
 
   // Table 2 — Loan Security Layers (G:M). The most recent active layer wins: its Amount is the
   // balance in effect (a total, not an increment) and its Active Rate is the rate in effect.
+  // A layer holding a "New Installment" security adds up its rows of the breakdown (Table 4),
+  // where that security is a formula on its Schedule row — so it follows a changed rate.
+  const secsOf = (l) => ((l.securities && l.securities.length) ? l.securities : [{ amount: l.amount, rate: l.activeRate }]);
+  const isLinked = (x) => x.newInst && x.instSl != null;
+  let nextBr = 3;
+  const brSpan = securityLayers.map((l) => { const a = nextBr; nextBr += secsOf(l).length; return [a, nextBr - 1]; });
   title('G1', 'Loan Security Layers');
   ['Year', 'Month', 'Day', 'From Date', 'Amount', 'Active Rate', 'Security Identifier']
     .forEach((h, c) => head(XLSX.utils.encode_cell({ r: 1, c: 6 + c }), h));
@@ -1285,9 +1295,16 @@ function buildLayersSheet(rateLayers, securityLayers, cofRecs, includeLending = 
     const r = 3 + i; const [y, m, d] = ymd(l.fromDate);
     intCell(`G${r}`, y); intCell(`H${r}`, m); intCell(`I${r}`, d);
     dateCell(`J${r}`, `DATE(G${r},H${r},I${r})`);
-    numCell(`K${r}`, l.amount || 0);
-    pctCell(`L${r}`, l.activeRate || 0);
-    setCell(wsL, `M${r}`, `Loan Security ${i + 1}`, { text: true, s: RR_STYLE.cell });
+    const linked = secsOf(l).some(isLinked);
+    if (linked) {
+      const [a, b] = brSpan[i];
+      fNum(`K${r}`, `SUM(X${a}:X${b})`, RR_FMT.NUM2);
+      fNum(`L${r}`, `IF(K${r}=0,0,SUMPRODUCT(X${a}:X${b},Y${a}:Y${b})/K${r})`, RR_FMT.PCT2);
+    } else {
+      numCell(`K${r}`, l.amount || 0);
+      pctCell(`L${r}`, l.activeRate || 0);
+    }
+    setCell(wsL, `M${r}`, `Loan Security ${i + 1}${linked ? ' (incl. New Installment)' : ''}`, { text: true, s: RR_STYLE.cell });
   });
 
   // Table 3 — COF + ISC Layers (O:U). Year/Month/Day are integers; Eligible COF = MAX(COF,ISC)+0.3%.
@@ -1306,16 +1323,18 @@ function buildLayersSheet(rateLayers, securityLayers, cofRecs, includeLending = 
   });
 
   // Table 4 — Loan Security breakdown (W:Y). Each individual security behind the combined rows in
-  // G:M (where K = Σ these amounts and L = the amount-weighted-average of these rates). Purely
-  // informational — the Schedule never references this table, so the combined table stays intact.
+  // G:M (where K = Σ these amounts and L = the amount-weighted-average of these rates). The
+  // Schedule never references this table; only a layer with a "New Installment" security adds
+  // its rows up in G:M. That security's amount is the installment on its Schedule row (C, the
+  // row of Sl. n is n + 2), to the cent.
   title('W1', 'Loan Security — Breakdown');
   ['From Date', 'Outstanding Amount', 'Interest Rate'].forEach((h, c) => head(XLSX.utils.encode_cell({ r: 1, c: 22 + c }), h));
   let br = 3;
   securityLayers.forEach((l) => {
-    const secs = (l.securities && l.securities.length) ? l.securities : [{ amount: l.amount, rate: l.activeRate }];
-    secs.forEach((s) => {
+    secsOf(l).forEach((s) => {
       setCell(wsL, `W${br}`, fmtDateDMY(l.fromDate), { text: true, s: RR_STYLE.cell, typed: true });
-      numCell(`X${br}`, s.amount || 0);
+      if (isLinked(s)) fNum(`X${br}`, `ROUND(Schedule!$C$${s.instSl + 2},2)`, RR_FMT.NUM2);
+      else numCell(`X${br}`, s.amount || 0);
       pctCell(`Y${br}`, s.rate || 0);
       br++;
     });

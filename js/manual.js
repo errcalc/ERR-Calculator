@@ -1,6 +1,6 @@
 // Per-module user guide — opened from the info button in the header. Plain, simple language
 // (explained as if to a 10-year-old). Sections are collapsed by default; click to expand.
-import { el, openModal, closeModal } from './components.js?v=20261101k';
+import { el, openModal, closeModal } from './components.js?v=20261102a';
 
 // ---- Shared sections reused across modules ----
 const MODALITY_BULLETS = [
@@ -77,6 +77,7 @@ const SECURITY_LAYERS_SECTION = {
     'Type the full balance for that date (a total, not an addition). The most recent row applies until the next row’s date.',
     'The bank earns the gap between the cost of fund and the security’s rate — this is the Loan Security Benefit.',
     'If the balance changes on a day that is not a payment day, the system splits that month by the exact number of days, so the benefit is correct.',
+    'New Installment — when a new security should equal the installment after a rate change, press “New Installment” under its amount. It takes the first installment after the row’s From Date (use the rate change date) and keeps following it if you change the inputs. You can still type your own amount; pressing the button again puts it back.',
   ],
 };
 const REFERENCE_SECTION = {
@@ -252,7 +253,7 @@ const MANUALS = {
         bullets: [
           'FDR / Cash Security — one fixed amount.',
           'EMI / EQI after Moratorium, or Installment — built up in installments.',
-          'The list only offers the installment types your layers use: EMI needs an EMI layer, EQI an EQI layer, and Installment an Equal Principal layer. Each is sized as if the whole loan after the moratorium were paid that way.',
+          'The list only offers the installment types your layers use: EMI needs an EMI layer, EQI an EQI layer, and Installment an Equal Principal layer. EMI and EQI are sized as if the whole loan after the moratorium were paid that way; Installment is the first installment of your first Equal Principal layer.',
         ],
       },
       { h: 'The security’s Amount & Rate', p: 'Named after whichever security you picked — pick FDR and they read “FDR Amount” and “FDR Rate”. How much safety money is kept, and its rate. The bank’s gain from it is added to the return.' },
@@ -282,7 +283,7 @@ const MANUALS = {
       SECURITY_LAYERS_SECTION,
       {
         h: 'COF Data Upload',
-        p: 'Upload the bank’s monthly Cost of Fund file. Press “Download Sample File”, type only in the light blue cells (Year, Month, Day, COF and ISC; the rest is locked), then upload it back. The system uses Eligible COF = the bigger of COF and ISC, plus 0.3%.',
+        p: 'Upload the bank’s monthly Cost of Fund file. Press “Download Sample File”, fill only the Input Required columns (Year, Month, Day, COF and ISC — the Do Not Edit columns are locked), then upload it back. The system uses Eligible COF = the bigger of COF and ISC, plus 0.3%.',
         bullets: [
           'The data MUST start on or before the disbursement date. If it does not, the system stops and asks you to add earlier data — nothing is calculated until you do.',
         ],

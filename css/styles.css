@@ -1261,6 +1261,23 @@ table.schedule th {
 .sec-add-entry { margin-top: 2px; }
 .sec-edit-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 
+/* "New Installment" (Rate Revision): a small toggle under a security's amount; lit while the
+   amount follows the first installment after the From Date. The note says which installment. */
+.sec-entries .sec-entry { align-items: start; }
+.sec-entries .sec-entry .row-del { margin-top: 4px; }
+.sec-amt { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.sec-ni { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.sec-ni-btn {
+  padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border-strong);
+  background: var(--bg-soft); color: var(--text-soft);
+  font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.sec-ni-btn:hover { border-color: var(--primary); color: var(--primary); }
+.sec-ni-btn.on { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
+.sec-ni-note { margin: 0; font-size: 11px; }
+.sec-vals .sec-note { display: block; font-size: 10.5px; color: var(--text-mute); }
+
 /* Re-confirmation overlay — stacks above the modal (100) + date picker (200) */
 .sec-confirm-back {
   position: fixed; inset: 0; z-index: 400; display: flex; align-items: center; justify-content: center;
