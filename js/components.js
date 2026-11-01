@@ -1,5 +1,5 @@
 // Reusable UI component builders (returns DOM nodes)
-import { attachCommaFormatter, sanitizeDecimalString, formatTwoDecimalsOnBlur } from './formatting.js?v=20260923h';
+import { attachCommaFormatter, sanitizeDecimalString, formatTwoDecimalsOnBlur } from './formatting.js?v=20261101a';
 
 let uid = 0;
 const nextId = () => `f${++uid}`;
@@ -220,7 +220,14 @@ function attachDatePicker(input, { onChange = null, disable = null } = {}) {
     const base = ok ? d : new Date();
     viewYear = base.getFullYear(); viewMonth = base.getMonth();
   }
-  function commit(date) { selected = date; input.value = formatDDMMMYYYY(date); fireChange(); close(); }
+  // A calendar pick is a user edit, so it raises the input's own 'change' (whose listener below runs
+  // fireChange) and lets it bubble — the form's live recalc and draft autosave then hear picked dates
+  // exactly as they hear typed ones. Setting .value alone fires nothing.
+  function commit(date) {
+    selected = date; input.value = formatDDMMMYYYY(date);
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    close();
+  }
 
   function open() {
     if (pop) return;
@@ -423,12 +430,18 @@ export function monthBoxesField({ name, getCount, tooltip = '', label = '', sele
     wrapper.appendChild(head);
   }
 
+  // Boxes and bulk buttons are clicks, not form inputs, so they fire no 'input'/'change' of their
+  // own — announce each user change so the live recalc and draft autosave pick it up. (Not from
+  // render(): refresh/setValue rebuild the boxes without the user changing anything.)
+  const notifyChange = () => wrapper.dispatchEvent(new Event('change', { bubbles: true }));
+
   // Bulk-action buttons (right-aligned) — set every box to one state. The button whose state
   // matches ALL the boxes stays sharp; the other two blur. A manual mix of states blurs all
   // three, signalling that none is currently active.
   const setAll = (v) => {
     states = states.map(() => Math.min(v, maxState));
     render();
+    notifyChange();
   };
   const bulkBtns = {};
   if (selectAll && capitalizable) {
@@ -463,6 +476,7 @@ export function monthBoxesField({ name, getCount, tooltip = '', label = '', sele
       box.addEventListener('click', () => {
         states[i] = (states[i] + 1) % (maxState + 1);
         render();
+        notifyChange();
       });
       grid.appendChild(box);
     }
@@ -633,7 +647,11 @@ export function layeredField(opts) {
     rowApi.row.remove();
     syncHeaderVisibility();
     fireChange();
+    notifyChange();
   }
+  // Adding/removing a row is a click, not a form input, so announce it for the live recalc and
+  // draft autosave (the removed row is already detached — the event comes from the wrapper).
+  function notifyChange() { wrapper.dispatchEvent(new Event('change', { bubbles: true })); }
 
   const addBtn = el('button', { type: 'button', class: 'add-layer' }, addLabel);
   addBtn.addEventListener('click', () => {
@@ -647,6 +665,7 @@ export function layeredField(opts) {
     }
     addRow();
     fireChange();
+    notifyChange();
   });
   wrapper.appendChild(addBtn);
 
