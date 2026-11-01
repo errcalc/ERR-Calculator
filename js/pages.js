@@ -3,23 +3,23 @@ import {
   el, numberField, percentField, optionField, dateField, textField,
   monthBoxesField, layeredField, securityLayersField, rateLayersField, monthRateLayersField, toast, parseDDMMMYYYY, formatDDMMMYYYY,
   openModal, closeModal,
-} from './components.js?v=20261101i';
-import { isoToDDMMMYYYY } from './formatting.js?v=20261101i';
+} from './components.js?v=20261101k';
+import { isoToDDMMMYYYY } from './formatting.js?v=20261101k';
 import {
   buildStructuredSchedule, buildCustomizedSchedule,
   buildRateRevisionStructured, computeMetrics,
   buildSplitSchedule, principalPaymentMonths, SPLIT_MODE, FREQ, FREQ_NAMES,
   computeRevisionMetrics, computeRevisionCustomizedMetrics, buildCofData,
   addMonthsDue, COMMERCIAL_RATE, REFINANCE_RATE, REFINANCE_LENDING_RATE,
-} from './calculations.js?v=20261101i';
-import { formatMoney, formatPercent, formatNumber, formatRateLayers } from './formatting.js?v=20261101i';
-import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20261101i';
+} from './calculations.js?v=20261101k';
+import { formatMoney, formatPercent, formatNumber, formatRateLayers } from './formatting.js?v=20261101k';
+import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20261101k';
 import {
   downloadScheduleAsExcel, downloadSampleAmortization, readUploadedSchedule,
-  downloadScheduleAsWord, downloadScheduleAsPDF, downloadVerificationExcel, downloadReportPDF,
+  downloadScheduleAsWord, downloadScheduleAsPDF, downloadVerificationExcel,
   downloadCofSample, readUploadedCof,
   downloadCustomizedRevisionSample, readCustomizedRevisionFile,
-} from './excel.js?v=20261101i';
+} from './excel.js?v=20261101k';
 
 // Cached page state by tab key (also persisted via storage saveDraft)
 const tabState = {};
@@ -32,6 +32,11 @@ export const PAGE_TITLES = {
   revisionStructured: 'ERR - Rate Revision — from the loan details',
   revisionCustomized: 'ERR - Rate Revision — from an uploaded schedule',
 };
+
+// Marks the Verification Excel as internal (drawn in the button's own text colour).
+const LOCK_ICON = '<svg class="dl-lock" viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">'
+  + '<rect x="3" y="7" width="10" height="7.5" rx="1.5" fill="currentColor"/>'
+  + '<path d="M5.4 7V5.2a2.6 2.6 0 0 1 5.2 0V7" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
 
 // Render a field's label across two lines: a primary phrase plus a secondary part.
 // The secondary part stays inline on desktop (reads as one line, unchanged look) and
@@ -602,6 +607,7 @@ export function renderCustomizedLoan(root, pre = null) {
           else if (!f.value) f.value = fallback;
         });
       });
+      refreshSecurityOptions();
     },
   });
   // Toast on the layered field's "cannot add" callback (e.g. last layer already ends at maturity)
@@ -630,16 +636,28 @@ export function renderCustomizedLoan(root, pre = null) {
 
   const totalCof = percentField({ label: 'Total Cost of Fund [COF/ISC + OPEX]', name: 'totalCof' });
   setTwoLineLabel(totalCof, 'Total Cost of Fund', '(COF/ISC + OPEX)');
+  // Only the securities these layers can be sized against: an EMI or EQI instalment needs an
+  // EMI or EQI layer, a plain "Installment" an Equal Principal one. The split and Customized
+  // Principal types have no single instalment, so on their own they leave the cash-backed options.
   function customizedSecurityOptions() {
     const moraYes = moratoriumAvail.getValue() === 'Yes';
-    return [{ label: 'select', value: '' }, 'No Funded Security', 'FDR', 'Cash Security',
-      installmentSecurityOption('EMI', moraYes), installmentSecurityOption('EQI', moraYes)];
+    const types = paymentLayers.rows.map(r => r.inputs.paymentType.value || '');
+    const opts = ['No Funded Security', 'FDR', 'Cash Security'];
+    if (types.includes('EMI')) opts.push(installmentSecurityOption('EMI', moraYes));
+    if (types.includes('EQI')) opts.push(installmentSecurityOption('EQI', moraYes));
+    if (types.some(t => t.startsWith('Equal Principal'))) opts.push('Installment');
+    return [{ label: 'select', value: '' }, ...opts];
   }
   const fundedSecurityType = optionField({
     label: 'Funded Security Type', name: 'fundedSecurityType',
     options: customizedSecurityOptions(), value: '', onChange: refresh,
   });
   setTwoLineLabel(fundedSecurityType, 'Funded Security', 'Type');
+  // Rebuilt whenever a layer changes; a pick the layers no longer support falls back to "select".
+  function refreshSecurityOptions() {
+    fundedSecurityType.setOptions(customizedSecurityOptions());
+    rebuildSecurityRow();
+  }
   // Renamed after the chosen security type by labelSecurityFields(); these are placeholders.
   const csAmount = numberField({ label: 'Security Amount', name: 'csAmount' });
   const csRate = percentField({ label: 'Security Rate', name: 'csRate' });
@@ -676,8 +694,7 @@ export function renderCustomizedLoan(root, pre = null) {
     loanTenor.setLabel(moraYes ? 'Loan Tenor including Moratorium (Months)' : 'Loan Tenor (Months)');
     // Relabel the installment-sized security options when the moratorium is toggled
     // (setOptions keeps the current selection, since only the label changes).
-    fundedSecurityType.setOptions(customizedSecurityOptions());
-    rebuildSecurityRow();
+    refreshSecurityOptions();
     syncOptionalColumns();
   }
   refresh();
@@ -1380,13 +1397,13 @@ function renderResults(panel, ctx) {
   const sk = String(ctx.inputs.fundedSecurityType || '');
   if ((sk.startsWith('EMI') || sk.startsWith('EQI') || sk === 'Installment') && m.derivedSecurityAmount > 0) {
     grid.appendChild(metric(
-      `Security Amount (${sk} × ${ctx.inputs.numInst || 1})`,
+      `Security Amount (${securityDisplayName(sk, ctx.inputs.moratoriumAvail === 'Yes')} × ${ctx.inputs.numInst || 1})`,
       formatMoney(m.derivedSecurityAmount)
     ));
   }
   card.appendChild(grid);
+  panel.appendChild(card);
 
-  // Top-right actions: Download Report (left), Verify Calculation (right).
   // Optional user reference is prefixed to every file name (sanitized of OS-illegal chars).
   const refRaw = (ctx.inputs && ctx.inputs.reference) ? String(ctx.inputs.reference) : '';
   const refPrefix = refRaw.replace(/[\\/:*?"<>|]+/g, '').trim();
@@ -1397,15 +1414,33 @@ function renderResults(panel, ctx) {
     const stamp = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
     return (refPrefix ? refPrefix + '_' : '') + ctx.pageTitle.replace(/[^a-z0-9]+/gi, '_') + '_' + stamp;
   };
-  const reportBtn = el('button', { class: 'secondary-btn', type: 'button' }, '📄 Download Report');
-  const verifyBtn = el('button', { class: 'verify-btn', type: 'button' }, 'Verify Calculation');
-  reportBtn.addEventListener('click', () => downloadReportPDF(baseFname() + '_Report.pdf', ctx));
+
+  // Every download on one line, frozen under the app bar while the schedule scrolls past (like
+  // a frozen row in Excel). The schedule files carry no COF and may go to a client; the
+  // Verification Excel shows the bank's cost of fund and margin, so it is set apart and marked
+  // for internal use.
+  const meta = buildScheduleMeta(ctx);
+  const dlBtn = (text, onClick) => {
+    const b = el('button', { class: 'dl-btn', type: 'button' }, text);
+    b.addEventListener('click', onClick);
+    return b;
+  };
+  const verifyBtn = el('button', { class: 'verify-btn', type: 'button' });
+  verifyBtn.innerHTML = LOCK_ICON + 'Verify<span class="dl-long"> Calculation</span>';
   verifyBtn.addEventListener('click', () => downloadVerificationExcel(baseFname() + '_Verification.xlsx', ctx));
-  card.appendChild(el('div', { class: 'results-actions' }, reportBtn, verifyBtn));
+  panel.appendChild(el('div', { class: 'dl-bar' },
+    el('div', { class: 'dl-group' },
+      el('div', { class: 'dl-cap' }, 'Reports for external use'),
+      el('div', { class: 'dl-btns' },
+        dlBtn('⬇ Excel', () => downloadScheduleAsExcel(baseFname() + '.xlsx', ctx.schedule, meta)),
+        dlBtn('⬇ Word', () => downloadScheduleAsWord(baseFname() + '.docx', ctx.schedule, meta)),
+        dlBtn('⬇ PDF', () => downloadScheduleAsPDF(baseFname() + '.pdf', ctx.schedule, meta)))),
+    el('div', { class: 'dl-group dl-internal' },
+      el('div', { class: 'dl-cap' }, 'Internal use only'),
+      el('div', { class: 'dl-btns' }, verifyBtn))));
 
-  panel.appendChild(card);
-
-  // Amortization schedule + totals + downloads
+  // Amortization schedule + totals. No TOTAL row: on a long schedule its column names are a
+  // scroll away, while the labelled boxes under it say what each total is.
   const tableCard = el('div', { class: 'section-card' });
   tableCard.appendChild(el('h2', {}, 'Amortization Schedule'));
   const wrap = el('div', { class: 'table-wrap' });
@@ -1431,12 +1466,6 @@ function renderResults(panel, ctx) {
     if (hasRates) cells.push(r.sl > 0 ? formatPercent(r.rate) : '', r.sl > 0 ? formatPercent(r.cof) : '');
     tbody.appendChild(el('tr', {}, ...cells.map(c => el('td', {}, c))));
   });
-  const totalCells = ['TOTAL'];
-  if (hasDate) totalCells.push('');
-  totalCells.push(formatMoney(totPay), formatMoney(totInt), formatMoney(totPrin), '');
-  if (hasIDP) totalCells.push('');
-  if (hasRates) totalCells.push('', '');
-  tbody.appendChild(el('tr', { class: 'totals-row' }, ...totalCells.map(c => el('td', {}, c))));
   table.appendChild(thead);
   table.appendChild(tbody);
   wrap.appendChild(table);
@@ -1455,29 +1484,21 @@ function renderResults(panel, ctx) {
   );
   tableCard.appendChild(summaryRow);
 
-  const meta = buildScheduleMeta(ctx);
-  const dlExcel = el('button', { class: 'secondary-btn', type: 'button' }, '⬇ Excel');
-  const dlWord = el('button', { class: 'secondary-btn', type: 'button' }, '⬇ Word');
-  const dlPdf = el('button', { class: 'secondary-btn', type: 'button' }, '⬇ PDF');
-  const dlBar = el('div', { class: 'download-box' },
-    el('div', { class: 'dl-title' }, 'Download the Schedule'),
-    el('div', { class: 'download-buttons' }, dlExcel, dlWord, dlPdf),
-  );
-  tableCard.appendChild(dlBar);
-  dlExcel.addEventListener('click', () => downloadScheduleAsExcel(baseFname() + '.xlsx', ctx.schedule, meta));
-  dlWord.addEventListener('click', () => downloadScheduleAsWord(baseFname() + '.docx', ctx.schedule, meta));
-  dlPdf.addEventListener('click', () => downloadScheduleAsPDF(baseFname() + '.pdf', ctx.schedule, meta));
-
   panel.appendChild(tableCard);
   setTimeout(markFittingTables, 0);
 }
 
 // A schedule that fits its pane keeps its column names pinned while the page scrolls (CSS
 // .table-wrap.fits); one that needs sideways scrolling keeps its own scroll box instead.
+// The names park just under the frozen download line, so each pane learns that line's height.
 function markFittingTables() {
   document.querySelectorAll('.table-wrap').forEach((w) => {
     const t = w.querySelector('table');
     if (t) w.classList.toggle('fits', t.offsetWidth <= w.clientWidth + 1);
+  });
+  document.querySelectorAll('.wb-output').forEach((pane) => {
+    const bar = pane.querySelector('.dl-bar');
+    pane.style.setProperty('--dl-bar-h', (bar ? bar.offsetHeight : 0) + 'px');
   });
 }
 // Re-checked whenever a results pane changes width (window resized, panes stacking or not).
@@ -1547,12 +1568,8 @@ function restoreDraft(tabKey, fields) {
     if (fields.rrPrinFreq && data.rrPrinFreq) fields.rrPrinFreq.setValue(data.rrPrinFreq);
     if (fields.rrPrinBasis && data.rrPrinBasis) fields.rrPrinBasis.setValue(data.rrPrinBasis);
     if (fields.paymentModality && data.paymentModality) fields.paymentModality.setValue(data.paymentModality);
-    if (fields.totalCof && data.totalCof !== undefined) fields.totalCof.setValue(data.totalCof);
-    if (fields.fundedSecurityType && data.fundedSecurityType) fields.fundedSecurityType.setValue(data.fundedSecurityType);
-    if (fields.csAmount && data.csAmount !== undefined) fields.csAmount.setValue(data.csAmount);
-    if (fields.csRate && data.csRate !== undefined) fields.csRate.setValue(data.csRate);
-    if (fields.numInst && data.numInst) fields.numInst.setValue(data.numInst);
-    if (fields.nimComparison && data.nimComparison) fields.nimComparison.setValue(data.nimComparison);
+    // Layers before the security: on the payment-layers form they decide which security types
+    // the list offers, so a saved "EMI after Moratorium" needs its EMI layer back first.
     if (fields.paymentLayers && Array.isArray(data.paymentLayers) && data.paymentLayers.length) {
       // Convert ISO->display etc. handled by layered field's number/percent setters internally
       fields.paymentLayers.setValue(data.paymentLayers.map(L => ({
@@ -1562,6 +1579,12 @@ function restoreDraft(tabKey, fields) {
         customPrincipal: L.customPrincipal,
       })));
     }
+    if (fields.totalCof && data.totalCof !== undefined) fields.totalCof.setValue(data.totalCof);
+    if (fields.fundedSecurityType && data.fundedSecurityType) fields.fundedSecurityType.setValue(data.fundedSecurityType);
+    if (fields.csAmount && data.csAmount !== undefined) fields.csAmount.setValue(data.csAmount);
+    if (fields.csRate && data.csRate !== undefined) fields.csRate.setValue(data.csRate);
+    if (fields.numInst && data.numInst) fields.numInst.setValue(data.numInst);
+    if (fields.nimComparison && data.nimComparison) fields.nimComparison.setValue(data.nimComparison);
     // The layers as last saved (older drafts only carry the fitted copy).
     if (fields.intRateLayers) fields.intRateLayers.setValue(data.intRateLayersSaved || data.intRateLayers || []);
     if (fields.rateLayers && Array.isArray(data.rateLayers) && data.rateLayers.length) {

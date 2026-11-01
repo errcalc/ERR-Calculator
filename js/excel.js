@@ -1,10 +1,10 @@
 // Excel / Word / PDF I/O via CDN libs
-import { formatMoney as fmtM, formatPercent as fmtP, formatRateLayers } from './formatting.js?v=20261101i';
-import { SPLIT_MODE, REFINANCE_RATE, REFINANCE_LENDING_RATE, REFINANCE_COF } from './calculations.js?v=20261101i';
+import { formatMoney as fmtM, formatPercent as fmtP } from './formatting.js?v=20261101k';
+import { SPLIT_MODE, REFINANCE_RATE, REFINANCE_LENDING_RATE, REFINANCE_COF } from './calculations.js?v=20261101k';
 
 // Funded Security as it READS on screen. The stored value is always "<kind> after Moratorium",
-// but on a loan with no moratorium the UI shows "<kind> Installment" — the workbook and the PDF
-// quote the same words so a reader is not left comparing two different names for one thing.
+// but on a loan with no moratorium the UI shows "<kind> Installment" — the workbook quotes the
+// same words so a reader is not left comparing two different names for one thing.
 function securityTypeLabel(inp) {
   const v = String(inp.fundedSecurityType || '');
   const m = v.match(/^(EMI|EQI) after Moratorium$/);
@@ -218,7 +218,7 @@ export function downloadScheduleAsPDF(filename, schedule, meta = {}) {
 
 // =====================================================================
 // Verify Calculation Excel — exactly mirrors "Sample format for verification.xlsx"
-// Styling: navy title, green section headers w/ white bold text, accounting/percent
+// Styling: navy title, grey section headers with navy text, accounting/percent
 // number formats matching sample, formulas linking Results -> Inputs + Schedule.
 // =====================================================================
 const FMT = {
@@ -227,24 +227,28 @@ const FMT = {
   PCT2: '0.00%',
   PCT4: '0.0000%',
 };
+// Mild corporate palette, shared by every Verification sheet: navy title bar, grey headings
+// with navy text, light blue typed cells (TYPED_FILL below), white formula cells.
+const NAVY = '1F3864';
+const HEAD_FILL = 'D9D9D9';
 const WHITE_BOLD = { bold: true, color: { rgb: 'FFFFFF' }, sz: 11 };
 const STYLE = {
   title: {
     font: { ...WHITE_BOLD, sz: 12 },
-    fill: { fgColor: { rgb: '002060' } },
+    fill: { fgColor: { rgb: NAVY } },
     alignment: { horizontal: 'center', vertical: 'center' },
   },
-  greenHeader: {
-    font: WHITE_BOLD,
-    fill: { fgColor: { rgb: '00B050' } },
+  header: {
+    font: { bold: true, color: { rgb: NAVY }, sz: 11 },
+    fill: { fgColor: { rgb: HEAD_FILL } },
     alignment: { horizontal: 'center', vertical: 'center' },
   },
   cellCenter: { alignment: { horizontal: 'center' } },
 };
 const RIGHT = { alignment: { horizontal: 'right' } };
 
-// Rate Revision verification look (matches the rectified file): bigger navy title, green
-// banners/headers with DARK text. Number formats are the plain red-negative variants used on
+// Rate Revision verification look (the rectified file's layout): bigger navy title, grey
+// banners/headers with navy text. Number formats are the plain red-negative variants used on
 // the Inputs/Results/Layers sheets (the Schedule keeps the accounting format above).
 const RR_FMT = {
   NUM2: '#,##0.00_);[Red](#,##0.00)',
@@ -256,10 +260,10 @@ const RR_FMT = {
   DATE_SHORT: '[$-409]d-mmm-yy;@',
 };
 const RR_STYLE = {
-  title: { font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 16 }, fill: { fgColor: { rgb: '002060' } }, alignment: { horizontal: 'center', vertical: 'center' } },
-  subtitle: { font: { bold: true, color: { rgb: '000000' }, sz: 11 }, fill: { fgColor: { rgb: '00B050' } }, alignment: { horizontal: 'center', vertical: 'center' } },
-  banner: { font: { bold: true, color: { rgb: '000000' }, sz: 14 }, fill: { fgColor: { rgb: '00B050' } }, alignment: { horizontal: 'center', vertical: 'center' } },
-  colHead: { font: { bold: true, color: { rgb: '000000' }, sz: 11 }, fill: { fgColor: { rgb: '00B050' } }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true } },
+  title: { font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 16 }, fill: { fgColor: { rgb: NAVY } }, alignment: { horizontal: 'center', vertical: 'center' } },
+  subtitle: { font: { bold: true, color: { rgb: NAVY }, sz: 11 }, fill: { fgColor: { rgb: HEAD_FILL } }, alignment: { horizontal: 'center', vertical: 'center' } },
+  banner: { font: { bold: true, color: { rgb: NAVY }, sz: 14 }, fill: { fgColor: { rgb: HEAD_FILL } }, alignment: { horizontal: 'center', vertical: 'center' } },
+  colHead: { font: { bold: true, color: { rgb: NAVY }, sz: 11 }, fill: { fgColor: { rgb: HEAD_FILL } }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true } },
   cell: { alignment: { horizontal: 'center', vertical: 'center' } },
 };
 
@@ -284,11 +288,11 @@ function setCell(ws, addr, value, opts = {}) {
 // Typed values and formula results look different on every Verification sheet, so a reader
 // sees at once which numbers were entered and which the workbook works out. A value written in
 // (a form input, or a figure copied from the calculator where Excel cannot rebuild it) turns
-// yellow with blue text; a formula result stays white with black text; headings keep their
+// light blue with dark blue text; a formula result stays white with black text; headings keep their
 // own colours. DATE(2023,1,10) with plain numbers is a typed date, so it counts as typed.
 // Sl. and Layer numbers only label rows, so they are left alone.
-const TYPED_FILL = 'FFF2CC';
-const TYPED_FONT = '0000FF';
+const TYPED_FILL = 'DDEBF7';
+const TYPED_FONT = '1F4E79';
 const typedStyle = (s = {}) => ({ ...s, fill: { patternType: 'solid', fgColor: { rgb: TYPED_FILL } },
   font: { ...(s.font || {}), color: { rgb: TYPED_FONT } } });
 function colourTypedCells(ws) {
@@ -326,22 +330,22 @@ function buildReadMeSheet(sheetNames, pageType) {
     if (b != null) setCell(ws, `B${r}`, b, { text: true, s: sB || { alignment: { vertical: 'top', wrapText: true } } });
     r++;
   };
-  const section = (title) => { r++; put(title, '', STYLE.greenHeader, STYLE.greenHeader); };
+  const section = (title) => { r++; put(title, '', STYLE.header, STYLE.header); };
   setCell(ws, 'A1', 'Read Me', { text: true, s: STYLE.title });
   setCell(ws, 'B1', '', { text: true, s: STYLE.title });
   r = 2;
   put('What this file is', 'It works out the same numbers as the ERR Calculator with Excel formulas, so anyone can check them cell by cell.');
   section('What the colours mean');
-  put('Yellow cell, blue text', 'A typed value: an input from the calculator, or a figure copied from it where Excel cannot rebuild it with a formula.',
+  put('Light blue cell', 'A typed value you can change: an input from the calculator, or a figure copied from it where Excel cannot rebuild it with a formula.',
     { ...typedStyle({ font: { bold: true } }), alignment: { vertical: 'top' } });
-  put('White cell, black text', 'Worked out by a formula from other cells. Click the cell to see the formula.');
-  put('Green or navy cell', 'A heading.', { ...STYLE.greenHeader, alignment: { vertical: 'top' } });
+  put('White cell', 'Worked out by a formula from other cells. Click the cell to see the formula.');
+  put('Grey or navy cell', 'A heading.', { ...STYLE.header, alignment: { vertical: 'top' } });
   section('The sheets in this file');
   sheetNames.forEach((n) => { if (README_SHEETS[n]) put(n, README_SHEETS[n]); });
   put('Read Me', 'This page.');
   section('The main formulas');
   if (pageType === 'revisionCustomized') {
-    put('Schedule', 'The dates, installments, interest, principal and balances are the ones in the schedule you uploaded, so they are typed values (yellow).');
+    put('Schedule', 'The dates, installments, interest, principal and balances are the ones in the schedule you uploaded, so they are typed values (light blue).');
     put('NIM and ERR', 'For an uploaded schedule the calculator works these out from the actual number of days between the dates. This file does not rebuild that yet, so its NIM and ERR cells show 0: use the figures on the calculator\'s screen.');
   } else {
     put('Interest', 'Balance at the start of the month × the interest rate ÷ 12.');
@@ -354,18 +358,40 @@ function buildReadMeSheet(sheetNames, pageType) {
   }
   section('Checking a number');
   put('See a formula', 'Click any white cell; the formula shows in the bar above the sheet.');
-  put('Try another value', 'Change a yellow cell and every formula that uses it updates. To add or remove a layer, change it in the calculator and download a new file.');
+  put('Try another value', 'Change a light blue cell and every formula that uses it updates. To add or remove a layer, change it in the calculator and download a new file.');
+  put('Locked cells', 'Only the light blue cells can be changed. Everything else is locked, so a formula cannot be typed over by mistake; you can still widen columns. To unlock a sheet: Review → Unprotect Sheet (there is no password).');
   ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: r - 2, c: 1 } });
   ws['!cols'] = [{ wch: 26 }, { wch: 110 }];
   ws['!merges'] = [];
   return ws;
 }
 
-// Every Verification workbook ends the same way: colours on each sheet, then Read Me last.
+// Every Verification workbook ends the same way: colours on each sheet, then Read Me last, and
+// every sheet locked except its light blue typed cells, so a formula cannot be typed over by
+// accident (columns and rows still resize; Review → Unprotect Sheet needs no password). The style
+// writer cannot mark a cell unlocked, so the finished file is opened once more and every cell
+// style that carries the typed fill gets <protection locked="0"/>.
 function writeVerificationWorkbook(wb, filename, pageType) {
   wb.SheetNames.forEach((n) => colourTypedCells(wb.Sheets[n]));
   XLSX.utils.book_append_sheet(wb, buildReadMeSheet([...wb.SheetNames], pageType), 'Read Me');
-  XLSX.writeFile(wb, filename, { cellStyles: true });
+  wb.SheetNames.forEach((n) => { wb.Sheets[n]['!protect'] = { formatColumns: false, formatRows: false }; });
+  const zip = XLSX.CFB.read(new Uint8Array(XLSX.write(wb, { bookType: 'xlsx', type: 'array', cellStyles: true })), { type: 'array' });
+  const styles = zip.FileIndex[zip.FullPaths.findIndex(p => /\/xl\/styles\.xml$/i.test(p))];
+  styles.content = new TextEncoder().encode(unlockTypedStyles(new TextDecoder().decode(styles.content)));
+  styles.size = styles.content.length;
+  const out = XLSX.CFB.write(zip, { fileType: 'zip', type: 'array', compression: true });
+  saveBlob(new Blob([new Uint8Array(out)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), filename);
+}
+
+// styles.xml: every cell style (xf) whose fill is the typed fill becomes unlocked.
+function unlockTypedStyles(xml) {
+  const fills = ((xml.match(/<fills[^>]*>([\s\S]*?)<\/fills>/) || [])[1] || '').match(/<fill>[\s\S]*?<\/fill>/g) || [];
+  const typed = new Set(fills.flatMap((f, i) => (f.includes(`rgb="FF${TYPED_FILL}"`) ? [i] : [])));
+  return xml.replace(/<cellXfs[^>]*>[\s\S]*?<\/cellXfs>/, (block) => block.replace(
+    /<xf\b([^>]*?)(?:\/>|>([\s\S]*?)<\/xf>)/g, (xf, attrs, inner = '') => {
+      const fillId = Number((attrs.match(/fillId="(\d+)"/) || [])[1]);
+      return typed.has(fillId) ? `<xf${attrs} applyProtection="1">${inner}<protection locked="0"/></xf>` : xf;
+    }));
 }
 
 export function downloadVerificationExcel(filename, ctx) {
@@ -405,7 +431,7 @@ export function downloadVerificationExcel(filename, ctx) {
                         'NIM (Yield to Maturity)', 'ERR (Yield to Maturity)',
                         ...(rateLayers ? ['Interest Rate (month)', 'COF (month)'] : [])];
   const wsSched = {};
-  schedHeaders.forEach((h, c) => setCell(wsSched, XLSX.utils.encode_cell({ r: 0, c }), h, { text: true, s: STYLE.greenHeader }));
+  schedHeaders.forEach((h, c) => setCell(wsSched, XLSX.utils.encode_cell({ r: 0, c }), h, { text: true, s: STYLE.header }));
 
   // Pre-compute input-cell references on the Inputs & Results sheet so the Schedule can quote them
   const inputsForRefs = { ...inputs, _derived: {
@@ -665,12 +691,12 @@ export function downloadVerificationExcel(filename, ctx) {
   }};
   const inputLines = collectInputLinesFor(pageType, inputsForExport);
 
-  // Title rows (A1: navy, A2: green)
+  // Title rows (A1: navy, A2: grey)
   setCell(wsInputs, 'A1', 'ERR Calculator – Verification', { text: true, s: STYLE.title });
-  setCell(wsInputs, 'A2', pageTitle, { text: true, s: STYLE.greenHeader });
+  setCell(wsInputs, 'A2', pageTitle, { text: true, s: STYLE.header });
   // Section header row 4
-  setCell(wsInputs, 'A4', 'Inputs', { text: true, s: STYLE.greenHeader });
-  setCell(wsInputs, 'B4', 'Values', { text: true, s: STYLE.greenHeader });
+  setCell(wsInputs, 'A4', 'Inputs', { text: true, s: STYLE.header });
+  setCell(wsInputs, 'B4', 'Values', { text: true, s: STYLE.header });
 
   // Input rows starting at row 5
   const inputStartRow = 5;
@@ -715,7 +741,7 @@ export function downloadVerificationExcel(filename, ctx) {
 
   // Results section
   const resHeaderRow = inputStartRow + inputLines.length + 1;
-  setCell(wsInputs, `A${resHeaderRow}`, 'Results', { text: true, s: STYLE.greenHeader });
+  setCell(wsInputs, `A${resHeaderRow}`, 'Results', { text: true, s: STYLE.header });
 
   const totalRowExcel = totalRowIdx + 1; // 1-indexed
   const tenor = idx.tenorMonths || idx.loanTenor;
@@ -768,12 +794,12 @@ export function downloadVerificationExcel(filename, ctx) {
   const totalMonths = schedule.rows.length - 1;
   const years = Math.ceil(totalMonths / 12);
   const ySummaryHeaderRow = lastRow + 2;
-  setCell(wsInputs, `A${ySummaryHeaderRow}`, 'Yearly Summary', { text: true, s: STYLE.greenHeader });
+  setCell(wsInputs, `A${ySummaryHeaderRow}`, 'Yearly Summary', { text: true, s: STYLE.header });
   const yColHeaderRow = ySummaryHeaderRow + 1;
   const ySumHeaders = ['Year', 'Interest Income', 'Interest Expense', 'Loan Security Benefit',
                        'Net Interest Income', 'Average Portfolio', 'NIM', 'YoY ERR'];
   ySumHeaders.forEach((h, c) => setCell(wsInputs, XLSX.utils.encode_cell({ r: yColHeaderRow - 1, c }),
-    h, { text: true, s: STYLE.greenHeader }));
+    h, { text: true, s: STYLE.header }));
 
   // For each year y (1..years), compute month range and write formulas
   for (let y = 1; y <= years; y++) {
@@ -1317,7 +1343,7 @@ function buildLayersSheet(rateLayers, securityLayers, cofRecs, includeLending = 
 function buildRateLayersSheet(layers, cofRef) {
   const ws = {};
   const heads = ['Layer', 'From Month', 'To Month', 'Rate Type', 'Interest Rate', 'COF'];
-  heads.forEach((h, c) => setCell(ws, XLSX.utils.encode_cell({ r: 0, c }), h, { text: true, s: STYLE.greenHeader }));
+  heads.forEach((h, c) => setCell(ws, XLSX.utils.encode_cell({ r: 0, c }), h, { text: true, s: STYLE.header }));
   layers.forEach((L, i) => {
     const r = i + 2;
     const refi = L.rateType === REFINANCE_RATE;
@@ -1351,8 +1377,7 @@ function securityAmtFor(inp, key) {
 // no fixed label match can follow.
 function collectInputLinesFor(pageType, inp) {
   const yesNo = (v) => (v === 'Yes' || v === true ? 'Yes' : 'No');
-  // A layered loan has no single Offered Rate; the layers are listed on the Rate_Layers sheet
-  // (Verification Excel) or under the inputs (Report PDF).
+  // A layered loan has no single Offered Rate; the layers are listed on the Rate_Layers sheet.
   const rateLine = inp.rateLayered
     ? ['Interest Rate Layers', (inp.intRateLayers || []).length + ' layer(s)']
     : ['Offered Rate', inp.offeredRate ?? 0, 'offeredRate'];
@@ -1445,202 +1470,6 @@ function inputIndex(lines, start) {
     else if (key === 'cash security / fdr rate') idx.csRate = row;
   });
   return idx;
-}
-
-// Yearly Summary rows from a schedule — mirrors the Calculation Verification Excel:
-// Income/Expense over months sl=firstSl..lastSl; Avg Portfolio + Loan Security Benefit over the
-// start-of-month window sl=firstSl-1..lastSl-1; NIM = NII/AvgPort; YoY ERR = (Expense/AvgPort)+NIM.
-function computeYearlySummary(ctx) {
-  const rows = (ctx.schedule && ctx.schedule.rows) || [];
-  if (rows.length < 2) return [];
-  const m = ctx.metrics || {}, inp = ctx.inputs || {}, params = ctx.params || {};
-  const isRevision = ctx.pageType === 'revisionStructured' || ctx.pageType === 'revisionCustomized';
-  const cofRate = params.cofRate != null ? params.cofRate : (inp.totalCof || 0);
-  const secAmt = m.derivedSecurityAmount != null ? m.derivedSecurityAmount : (inp.csAmount || 0);
-  const secRate = m.derivedSecurityRate != null ? m.derivedSecurityRate : (inp.csRate || 0);
-
-  // Rate-layered Loan Facilities: COF varies by month (1% in Refinance months), so take the
-  // engine's own per-row expense rather than a flat Total COF.
-  const layered = !!(params.rateLayers && params.rateLayers.length);
-
-  // Per-row interest expense + CS benefit (units = per month).
-  const per = rows.map((r, i) => {
-    const prevUrpa = i > 0 ? (rows[i - 1].urpa || 0) : (r.urpa || 0);
-    const intExp = (isRevision || layered) ? (r.interestExpense || 0) : (i > 0 ? prevUrpa * cofRate / 12 : 0);
-    const csBen = isRevision
-      ? ((r.cof || 0) - (r.securityRate || 0)) * (r.securityAmount || 0) / 12
-      : (cofRate - secRate) * secAmt / 12;
-    return { interest: r.interest || 0, intExp, csBen, urpa: r.urpa || 0 };
-  });
-
-  const totalMonths = rows.length - 1;
-  const years = Math.ceil(totalMonths / 12);
-  const out = [];
-  for (let y = 0; y < years; y++) {
-    const firstSl = y * 12 + 1, lastSl = Math.min((y + 1) * 12, totalMonths);
-    let income = 0, expense = 0, lsBen = 0, urpaSum = 0, urpaN = 0;
-    for (let sl = firstSl; sl <= lastSl; sl++) {
-      if (per[sl]) { income += per[sl].interest; expense += per[sl].intExp; }
-      if (per[sl - 1]) { lsBen += per[sl - 1].csBen; urpaSum += per[sl - 1].urpa; urpaN++; }
-    }
-    const avgPort = urpaN ? urpaSum / urpaN : 0;
-    const nii = income + lsBen - expense;
-    // Annualise both legs by 12/months so a final stub year is comparable with the full
-    // years above it; full years scale by 1 and are unchanged.
-    const ann = 12 / (lastSl - firstSl + 1);
-    const nim = avgPort ? (nii / avgPort) * ann : 0;
-    const yoyErr = avgPort ? (expense / avgPort) * ann + nim : 0;
-    out.push({ year: y + 1, income, expense, lsBen, nii, avgPort, nim, yoyErr });
-  }
-  return out;
-}
-
-// =====================================================================
-// Download Report — PDF with inputs + results + schedule (replication-ready)
-// =====================================================================
-export function downloadReportPDF(filename, ctx) {
-  const { jsPDF } = window.jspdf || {};
-  if (!jsPDF) { alert('PDF library not loaded.'); return; }
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
-  let y = 36;
-  doc.setFontSize(16); doc.setFont(undefined, 'bold');
-  doc.text(ctx.pageTitle, 40, y); y += 22;
-  doc.setFontSize(10); doc.setFont(undefined, 'normal');
-  doc.text('Generated: ' + new Date().toLocaleString(), 40, y); y += 16;
-
-  // Inputs
-  doc.setFontSize(12); doc.setFont(undefined, 'bold');
-  doc.text('Inputs', 40, y); y += 10;
-  const inputLines = collectInputLinesFor(ctx.pageType, ctx.inputs);
-  // Rename "Payment Mode" / "Payment Modality" → "Payment After Moratorium" when moratorium exists.
-  const reportMora = ctx.inputs.moratoriumAvail === 'Yes' || (Number(ctx.inputs.moratoriumPeriod) || 0) > 0;
-  if (reportMora) inputLines.forEach((line) => {
-    if (line[0] === 'Payment Mode' || line[0] === 'Payment Modality') line[0] = 'Payment After Moratorium';
-  });
-  // Add layer detail
-  const extras = [];
-  if (Array.isArray(ctx.inputs.paymentLayers)) {
-    ctx.inputs.paymentLayers.forEach((L, i) => {
-      extras.push([`Payment Layer ${i + 1}`, `${L.paymentType}: Month ${L.fromInstallment}–${L.toInstallment}` + (L.customPrincipal ? ` @ ${fmtM(L.customPrincipal)}/inst` : '')]);
-    });
-  }
-  if (ctx.inputs.rateLayered && Array.isArray(ctx.inputs.intRateLayers)) {
-    const pad = (m) => String(m).padStart(2, '0');
-    ctx.inputs.intRateLayers.forEach((L, i) => {
-      const cofNote = L.rateType === REFINANCE_RATE ? ` (COF ${fmtP(REFINANCE_COF)})` : '';
-      extras.push([`Interest Rate Layer ${i + 1}`, `Months ${pad(L.fromMonth)}–${pad(L.toMonth)}: ${L.rateType} ${fmtP(L.rate)}${cofNote}`]);
-    });
-  }
-  if (Array.isArray(ctx.inputs.rateLayers)) {
-    ctx.inputs.rateLayers.forEach((L, i) => {
-      extras.push([`Rate Layer ${i + 1}`, `${L.fromDate} – ${L.toDate}: ${fmtP(L.activeRate)}`]);
-    });
-  }
-  if (Array.isArray(ctx.inputs.securityLayers) && ctx.inputs.securityLayers.length) {
-    ctx.inputs.securityLayers.forEach((L, i) => {
-      extras.push([`Security Layer ${i + 1}`, `${L.fromDate} – ${L.toDate}: amt ${fmtM(L.amount)} @ ${fmtP(L.activeRate)}`]);
-    });
-  }
-  if (Array.isArray(ctx.inputs.cofLayers) && ctx.inputs.cofLayers.length) {
-    ctx.inputs.cofLayers.forEach((L, i) => {
-      extras.push([`COF Layer ${i + 1}`, `${L.fromDate} – ${L.toDate}: ${fmtP(L.cofRate)}`]);
-    });
-  }
-  if (Array.isArray(ctx.inputs.idpFlags) && ctx.inputs.idpFlags.some(Boolean)) {
-    const months = ctx.inputs.idpFlags.map((v, i) => v ? i + 1 : null).filter(Boolean);
-    extras.push(['Interest-paid Moratorium Months', months.map(m => `M${String(m).padStart(2, '0')}`).join(', ')]);
-  }
-
-  // Render input rows
-  const formatLine = ([k, v]) => {
-    let val = v;
-    if (typeof v === 'number') {
-      if (k.toLowerCase().includes('rate') || k.toLowerCase().startsWith('total cof')) val = fmtP(v);
-      else val = fmtM(v);
-    }
-    return [k, String(val)];
-  };
-  doc.autoTable({
-    head: [['Field', 'Value']],
-    body: [...inputLines.map(formatLine), ...extras],
-    startY: y,
-    styles: { fontSize: 9, cellPadding: 4, halign: 'center' },
-    headStyles: { fillColor: [37, 70, 224], textColor: 255, halign: 'center' },
-    margin: { left: 40, right: 40 },
-    columnStyles: { 0: { cellWidth: 240, halign: 'center' }, 1: { halign: 'center' } },
-  });
-  y = doc.lastAutoTable.finalY + 18;
-
-  // Results
-  const reportLayered = !!(ctx.params && ctx.params.rateLayers);
-  doc.setFont(undefined, 'bold'); doc.setFontSize(12);
-  doc.text('Results', 40, y); y += 10;
-  doc.autoTable({
-    head: [['Metric', 'Value']],
-    body: [
-      ['Effective Rate (ERR)', fmtP(ctx.metrics.effectiveRate)],
-      ['NIM', fmtP(ctx.metrics.nim)],
-      ...(reportLayered ? [['Effective COF', fmtP(ctx.metrics.effectiveCof)]] : []),
-      ['Net Interest Income', fmtM(ctx.metrics.nii)],
-      ['Avg Portfolio', fmtM(ctx.metrics.avgPortfolio)],
-      ['Total Interest', fmtM(ctx.metrics.totalInterest)],
-      ['Tenor (years)', String(Number(ctx.metrics.tenorYears || 0).toFixed(2))],
-    ],
-    startY: y,
-    styles: { fontSize: 9, cellPadding: 4, halign: 'center' },
-    headStyles: { fillColor: [37, 70, 224], textColor: 255, halign: 'center' },
-    margin: { left: 40, right: 40 },
-    columnStyles: { 0: { cellWidth: 240, halign: 'center' }, 1: { halign: 'center' } },
-  });
-  y = doc.lastAutoTable.finalY + 18;
-
-  // Yearly Summary — same table as the Calculation Verification Excel.
-  const ySummary = computeYearlySummary(ctx);
-  if (ySummary.length) {
-    doc.setFont(undefined, 'bold'); doc.setFontSize(12);
-    doc.text('Yearly Summary', 40, y); y += 10;
-    doc.autoTable({
-      head: [['Year', 'Interest Income', 'Interest Expense', 'Loan Security Benefit', 'Net Interest Income', 'Average Portfolio', 'NIM', 'YoY ERR']],
-      body: ySummary.map(r => [
-        `Year ${String(r.year).padStart(2, '0')}`,
-        fmtM(r.income), fmtM(r.expense), fmtM(r.lsBen), fmtM(r.nii), fmtM(r.avgPort), fmtP(r.nim), fmtP(r.yoyErr),
-      ]),
-      startY: y,
-      styles: { fontSize: 7, cellPadding: 3, halign: 'center', valign: 'middle' },
-      headStyles: { fillColor: [0, 176, 80], textColor: 255, halign: 'center' },
-      margin: { left: 40, right: 40 },
-    });
-    y = doc.lastAutoTable.finalY + 18;
-  }
-
-  // Schedule
-  doc.setFont(undefined, 'bold'); doc.setFontSize(12);
-  doc.text('Amortization Schedule', 40, y); y += 10;
-  const hasDate = ctx.schedule.rows[0]?.date !== undefined;
-  const headers = ['Sl.', ...(hasDate ? ['Date'] : []), 'Installment', 'Interest', 'Principal', 'URPA',
-    ...(reportLayered ? ['Rate', 'COF'] : [])];
-  let tInst = 0, tInt = 0, tPrin = 0;
-  const body = ctx.schedule.rows.map(r => {
-    const row = [String(r.sl)];
-    if (hasDate) row.push(r.date || '');
-    row.push(fmtM(r.installment), fmtM(r.interest), fmtM(r.principal), fmtM(r.urpa));
-    if (reportLayered) row.push(r.sl > 0 ? fmtP(r.rate) : '', r.sl > 0 ? fmtP(r.cof) : '');
-    tInst += Number(r.installment) || 0; tInt += Number(r.interest) || 0; tPrin += Number(r.principal) || 0;
-    return row;
-  });
-  const schedFoot = ['Total', ...(hasDate ? [''] : []), fmtM(tInst), fmtM(tInt), fmtM(tPrin), '',
-    ...(reportLayered ? ['', ''] : [])];
-  doc.autoTable({
-    head: [headers], body, foot: [schedFoot],
-    startY: y,
-    showFoot: 'lastPage',
-    styles: { fontSize: 8, cellPadding: 3, halign: 'center', valign: 'middle' },
-    headStyles: { fillColor: [37, 70, 224], textColor: 255, halign: 'center' },
-    footStyles: { fillColor: [230, 235, 255], textColor: 20, fontStyle: 'bold', halign: 'center' },
-    margin: { left: 40, right: 40 },
-  });
-
-  doc.save(filename);
 }
 
 export function downloadSampleAmortization() {

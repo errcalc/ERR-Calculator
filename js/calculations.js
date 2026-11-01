@@ -655,6 +655,18 @@ export function computeMetrics(schedule, params) {
     } else if (schedule.baseInstallment) {
       // Structured Equal-Principal: first installment size
       unitInstallment = schedule.baseInstallment;
+    } else if (Array.isArray(params.layers) && regularMonths > 0) {
+      // Payment layers: sized like EMI/EQI above, independent of the layers — the first
+      // installment if everything after the moratorium were paid like the first Equal Principal
+      // layer (principal ÷ installments + that period's interest), exactly as the one-style form.
+      const ep = params.layers.find(L => String(L.paymentType || '').startsWith('Equal Principal'));
+      if (ep) {
+        const step = ep.paymentType.endsWith('(Quarterly)') ? 3 : 1;
+        const firstInterest = rb.layered
+          ? basePrincipal * rb.factor(moratoriumMonths + 1, moratoriumMonths + step)
+          : basePrincipal * sizingRate * step / 12;
+        unitInstallment = basePrincipal / Math.ceil(regularMonths / step) + firstInterest;
+      }
     }
     securityAmount = unitInstallment * (numInst || 1);
     // securityRate keeps the passed value — the "Funded Security Rate" for EMI/EQI after

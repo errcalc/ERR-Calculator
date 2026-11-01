@@ -6,8 +6,12 @@
 // that with two modules and a handful of questions the RM can actually answer; the answers
 // decide which form they land on, and are carried into it so nothing is asked twice.
 // ============================================================
-import { el, optionField } from './components.js?v=20261101i';
-import { SPLIT_MODE } from './calculations.js?v=20261101i';
+import { el, optionField } from './components.js?v=20261101k';
+import { SPLIT_MODE } from './calculations.js?v=20261101k';
+
+// "Upload an existing schedule" is switched off until it is ready to offer (user, 01-Nov-2026).
+// While it is off, Rate Revision goes straight to its questions; true brings the fork back.
+export const SHOW_REVISION_UPLOAD = false;
 
 export const MODALITIES = [
   'EMI', 'EQI',
@@ -40,7 +44,9 @@ export function renderLanding(root, go) {
         () => go({ screen: 'questions', module: 'loan' })),
       choiceCard('ERR - Rate Revision',
         'Re-price a facility that is already running.',
-        () => go({ screen: 'revisionChoice', module: 'revision' })),
+        () => go(SHOW_REVISION_UPLOAD
+          ? { screen: 'revisionChoice', module: 'revision' }
+          : { screen: 'questions', module: 'revision', mode: 'structured' })),
     )));
 }
 
@@ -110,7 +116,7 @@ export function renderQuestions(root, ctx, go) {
     el('div', { class: 'action-bar' }, contBtn));
 
   root.appendChild(el('div', { class: 'screen' },
-    backLink(() => go({ screen: isLoan ? 'landing' : 'revisionChoice', module: ctx.module })),
+    backLink(() => go({ screen: isLoan || !SHOW_REVISION_UPLOAD ? 'landing' : 'revisionChoice', module: ctx.module })),
     el('h1', { class: 'screen-title' }, isLoan ? 'ERR - New Loan Facility' : 'ERR - Rate Revision'),
     card));
 

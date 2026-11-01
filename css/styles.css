@@ -49,7 +49,10 @@
 @media (max-width: 600px) { :root { --app-header-h: 62px; } }
 
 * { box-sizing: border-box; }
-html, body { height: 100%; }
+/* The body grows with the page (min-height, not height): the sticky app bar can only stay up
+   while its parent's box is on screen, and a body fixed at one screen let it scroll away. */
+html { height: 100%; }
+body { min-height: 100%; }
 html { font-size: 11.5px; } /* shrink whole UI to ~70% (16 -> 11.5) */
 body {
   margin: 0;
@@ -75,7 +78,7 @@ body {
   background: var(--header-bg);
   border-bottom: 1px solid rgba(0, 0, 0, 0.15);
 }
-/* Brand sits in the centre column; the theme toggle in the right column. */
+/* Brand sits in the centre column; the user-guide button and the theme toggle in the right. */
 .brand {
   grid-column: 2;
   display: flex;
@@ -897,13 +900,6 @@ select option { color: var(--text); background: var(--bg-elev); }
   color: var(--text-soft);
 }
 
-/* Totals row in schedule */
-tr.totals-row td {
-  font-weight: 600;
-  background: var(--bg-soft);
-  border-top: 2px solid var(--border-strong);
-}
-
 /* Totals summary cards under schedule */
 .totals-summary {
   display: grid;
@@ -931,33 +927,61 @@ tr.totals-row td {
   text-align: center;
 }
 
-/* Download schedule — outlined box holding the three download buttons as one segment */
-.download-box {
-  margin-top: 30px;
-  padding: 0;
-  border: none;
-  background: transparent;
-}
-.download-box .dl-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-soft);
-  margin-bottom: 12px;
-}
-.download-buttons {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-}
-.download-buttons .secondary-btn {
-  width: 100%;
-  text-align: center;
-}
-.results-actions {
+/* Downloads — one line, frozen under the app bar while the schedule scrolls past it (like a
+   frozen row in Excel; pages.js gives the schedule's pinned column names its height). Left: the
+   schedule files, which may go to a client. Right, behind a dashed divider: the Verification
+   Excel, internal only — its own colour and a lock. */
+.dl-bar {
+  position: sticky;
+  top: var(--app-header-h);
+  z-index: 5;
   display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  margin-top: 12px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-bottom: 14px;
+  padding: 8px 14px 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.dl-group { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.dl-cap {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-mute);
+  white-space: nowrap;
+}
+.dl-btns { display: flex; gap: 6px; }
+.dl-btn {
+  background: var(--bg-soft);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 14px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.dl-btn:hover { border-color: var(--primary); color: var(--primary); }
+.dl-internal {
+  margin-left: auto;
+  align-items: flex-end;
+  padding-left: 16px;
+  border-left: 1px dashed var(--border-strong);
+}
+.dl-bar .verify-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: 13px;
 }
 
 /* ===== Custom Windows-11-style date picker ===== */
@@ -1054,7 +1078,7 @@ table.schedule th {
    when the whole table fits its pane — pages.js then marks the wrap .fits. */
 .table-wrap { overflow-x: auto; }
 .table-wrap.fits { overflow: visible; }
-.table-wrap.fits table.schedule th { position: sticky; top: var(--app-header-h); z-index: 2; }
+.table-wrap.fits table.schedule th { position: sticky; top: calc(var(--app-header-h) + var(--dl-bar-h, 0px)); z-index: 2; }
 
 /* Compare view */
 .compare-grid-wrap { margin-top: 12px; }
@@ -1305,9 +1329,13 @@ table.schedule th {
      fields are both two lines tall and their input boxes sit on the same row. */
   .lbl-line2 { display: block; }
 
-  /* Results actions on one line, matching desktop: Download Report (left) + Verify (right) */
-  .results-actions { flex-wrap: nowrap; gap: 8px; }
-  .results-actions button { flex: 1 1 0; min-width: 0; font-size: 13px; padding: 9px 6px; }
+  /* Downloads stay on one line: smaller buttons, and Verify drops the word "Calculation" */
+  .dl-bar { padding: 7px 10px 9px; gap: 8px 10px; }
+  .dl-internal { padding-left: 10px; }
+  .dl-btns { gap: 5px; }
+  .dl-cap { font-size: 9px; letter-spacing: 0.3px; }
+  .dl-btn, .dl-bar .verify-btn { font-size: 12px; padding: 7px 9px; }
+  .dl-long { display: none; }
 
   /* Totals: three equal boxes that fit the screen; smaller numbers so they don't overflow */
   .totals-summary { gap: 6px; }
@@ -1327,8 +1355,12 @@ table.schedule th {
   .metric-card { padding: 12px; }
   .metric-card .value { font-size: 18px; }
   .metric-card .label { font-size: 11px; }
-  .brand-title { font-size: 14px; }
+  .brand-title { font-size: 14px; white-space: normal; }
   .brand-sub { font-size: 11px; }
+  /* Two buttons on the right leave no room to centre the title, so on a phone it sits left. */
+  .app-header { grid-template-columns: minmax(0, 1fr) auto; column-gap: 10px; }
+  .brand { grid-column: 1; align-items: flex-start; text-align: left; }
+  .header-actions { grid-column: 2; gap: 8px; }
   .toast-root { left: 12px; right: 12px; bottom: 14px; }
   .toast { max-width: none; min-width: 0; }
 }
@@ -1467,17 +1499,16 @@ table.schedule th {
 
 .hidden { display: none !important; }
 
-/* Header info button (left side, mirrors the theme toggle on the right) */
-.header-actions.header-left { grid-column: 1; justify-self: start; }
-.header-info {
-  width: 32px; height: 32px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  border: 1.5px solid rgba(255, 255, 255, 0.6);
-  background: transparent; color: #fff;
-  font-family: Georgia, 'Times New Roman', serif; font-style: italic; font-weight: 700; font-size: 16px;
-  line-height: 1; cursor: pointer; transition: background 0.15s, border-color 0.15s;
+/* The user-guide and theme buttons sit together on the right as a matching pair of round
+   icon buttons (colours from .app-header .ghost-btn). */
+.app-header .header-actions .ghost-btn {
+  width: 32px; height: 32px; padding: 0;
+  border-radius: 50%; justify-content: center;
 }
-.header-info:hover { background: rgba(255, 255, 255, 0.16); border-color: #fff; }
+.header-info {
+  font-family: Georgia, 'Times New Roman', serif; font-style: italic; font-weight: 700; font-size: 16px;
+  line-height: 1;
+}
 
 /* User-guide modal — wide, scrollable, collapsible sections */
 .modal-card--manual { width: min(660px, 95vw); max-height: 84vh; padding: 0; overflow: hidden; }

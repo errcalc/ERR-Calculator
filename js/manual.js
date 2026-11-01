@@ -1,6 +1,6 @@
 // Per-module user guide — opened from the info button in the header. Plain, simple language
 // (explained as if to a 10-year-old). Sections are collapsed by default; click to expand.
-import { el, openModal, closeModal } from './components.js?v=20261101i';
+import { el, openModal, closeModal } from './components.js?v=20261101k';
 
 // ---- Shared sections reused across modules ----
 const MODALITY_BULLETS = [
@@ -85,11 +85,11 @@ const REFERENCE_SECTION = {
 };
 const DOWNLOADS_SECTION = {
   h: 'Results & Downloads',
-  p: 'There is no Calculate button. As soon as the form has enough to work with, the right-hand side fills in by itself and keeps up with every change you make — so you can nudge the rate and watch the return move. Until it has enough, it simply tells you what is still missing. You get ERR (the real yearly return), NIM (the bank’s interest margin) and Net Interest Income (the money earned), and below them you can download:',
+  p: 'There is no Calculate button. As soon as the form has enough to work with, the right-hand side fills in by itself and keeps up with every change you make — so you can nudge the rate and watch the return move. Until it has enough, it simply tells you what is still missing. You get ERR (the real yearly return), NIM (the bank’s interest margin) and Net Interest Income (the money earned). Below them is one line of download buttons that stays at the top of the screen while you scroll through the schedule:',
   bullets: [
-    'The full payment Schedule as Excel, Word, or PDF.',
-    'A Report PDF that summarises the inputs and results.',
-    'A Verify Calculation Excel that shows every single formula, so anyone can check the maths.',
+    'Reports for external use — the full payment Schedule as Excel, Word or PDF. They show no cost of fund, so they can go to a client, and you can use them inside the bank too.',
+    'Internal use only — Verify Calculation, an Excel that shows every single formula so anyone can check the maths. It shows the bank’s cost of fund and margin, so keep it inside the bank. Only its light blue cells can be changed; the rest is locked.',
+    'Under the schedule, three boxes give the Total Principal Paid, Total Interest Paid and Total Payment.',
   ],
 };
 
@@ -252,6 +252,7 @@ const MANUALS = {
         bullets: [
           'FDR / Cash Security — one fixed amount.',
           'EMI / EQI after Moratorium, or Installment — built up in installments.',
+          'The list only offers the installment types your layers use: EMI needs an EMI layer, EQI an EQI layer, and Installment an Equal Principal layer. Each is sized as if the whole loan after the moratorium were paid that way.',
         ],
       },
       { h: 'The security’s Amount & Rate', p: 'Named after whichever security you picked — pick FDR and they read “FDR Amount” and “FDR Rate”. How much safety money is kept, and its rate. The bank’s gain from it is added to the return.' },
@@ -261,7 +262,7 @@ const MANUALS = {
 
   revisionStructured: {
     title: 'ERR - Rate Revision — from the loan details',
-    intro: 'You chose to give the original terms rather than upload a finished schedule. List each rate and the day it started, add any security, and upload the bank’s monthly cost-of-fund file — the system rebuilds the whole schedule and finds the ERR.',
+    intro: 'Give the facility’s original terms: list each rate and the day it started, add any security, and upload the bank’s monthly cost-of-fund file — the system rebuilds the whole schedule and finds the ERR.',
     sections: [
       { h: 'Initial Loan Amount', p: 'The starting loan money, for example 100,000,000.' },
       { h: 'Disbursement Date', p: 'The day the loan money was handed out. Everything is counted from this day. It cannot be a Friday or Saturday.' },
@@ -281,7 +282,7 @@ const MANUALS = {
       SECURITY_LAYERS_SECTION,
       {
         h: 'COF Data Upload',
-        p: 'Upload the bank’s monthly Cost of Fund file. Press “Download Sample File”, fill only the input columns (COF and ISC), then upload it back. The system uses Eligible COF = the bigger of COF and ISC, plus 0.3%.',
+        p: 'Upload the bank’s monthly Cost of Fund file. Press “Download Sample File”, type only in the light blue cells (Year, Month, Day, COF and ISC; the rest is locked), then upload it back. The system uses Eligible COF = the bigger of COF and ISC, plus 0.3%.',
         bullets: [
           'The data MUST start on or before the disbursement date. If it does not, the system stops and asks you to add earlier data — nothing is calculated until you do.',
         ],
@@ -307,7 +308,7 @@ const MANUALS = {
       REFERENCE_SECTION,
       {
         h: 'Results & Downloads',
-        p: 'The ERR, NIM and Net Interest Income appear on the right as soon as the file is uploaded — there is no Calculate button. Then download the schedule, a Report PDF, or the Verify Calculation Excel that shows every formula — including a sheet with your Loan Security and COF layer tables.',
+        p: 'The ERR, NIM and Net Interest Income appear on the right as soon as the file is uploaded — there is no Calculate button. Then download the schedule, or the Verify Calculation Excel that shows every formula — including a sheet with your Loan Security and COF layer tables.',
       },
     ],
   },
