@@ -3,23 +3,23 @@ import {
   el, numberField, percentField, optionField, dateField, textField,
   monthBoxesField, layeredField, securityLayersField, rateLayersField, monthRateLayersField, toast, parseDDMMMYYYY, formatDDMMMYYYY,
   openModal, closeModal,
-} from './components.js?v=20261101g';
-import { isoToDDMMMYYYY } from './formatting.js?v=20261101g';
+} from './components.js?v=20261101i';
+import { isoToDDMMMYYYY } from './formatting.js?v=20261101i';
 import {
   buildStructuredSchedule, buildCustomizedSchedule,
   buildRateRevisionStructured, computeMetrics,
   buildSplitSchedule, principalPaymentMonths, SPLIT_MODE, FREQ, FREQ_NAMES,
   computeRevisionMetrics, computeRevisionCustomizedMetrics, buildCofData,
   addMonthsDue, COMMERCIAL_RATE, REFINANCE_RATE, REFINANCE_LENDING_RATE,
-} from './calculations.js?v=20261101g';
-import { formatMoney, formatPercent, formatNumber, formatRateLayers } from './formatting.js?v=20261101g';
-import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20261101g';
+} from './calculations.js?v=20261101i';
+import { formatMoney, formatPercent, formatNumber, formatRateLayers } from './formatting.js?v=20261101i';
+import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20261101i';
 import {
   downloadScheduleAsExcel, downloadSampleAmortization, readUploadedSchedule,
   downloadScheduleAsWord, downloadScheduleAsPDF, downloadVerificationExcel, downloadReportPDF,
   downloadCofSample, readUploadedCof,
   downloadCustomizedRevisionSample, readCustomizedRevisionFile,
-} from './excel.js?v=20261101g';
+} from './excel.js?v=20261101i';
 
 // Cached page state by tab key (also persisted via storage saveDraft)
 const tabState = {};

@@ -1,6 +1,6 @@
 // Excel / Word / PDF I/O via CDN libs
-import { formatMoney as fmtM, formatPercent as fmtP, formatRateLayers } from './formatting.js?v=20261101g';
-import { SPLIT_MODE, REFINANCE_RATE, REFINANCE_LENDING_RATE, REFINANCE_COF } from './calculations.js?v=20261101g';
+import { formatMoney as fmtM, formatPercent as fmtP, formatRateLayers } from './formatting.js?v=20261101i';
+import { SPLIT_MODE, REFINANCE_RATE, REFINANCE_LENDING_RATE, REFINANCE_COF } from './calculations.js?v=20261101i';
 
 // Funded Security as it READS on screen. The stored value is always "<kind> after Moratorium",
 // but on a loan with no moratorium the UI shows "<kind> Installment" — the workbook and the PDF
@@ -275,7 +275,97 @@ function setCell(ws, addr, value, opts = {}) {
   // style, so passing STYLE.cellCenter alongside a percent format turned every later
   // cellCenter cell into a percentage (Rate_Layers showed layer 2 / month 4 as 200% / 400%).
   if (opts.s) cell.s = { ...opts.s };
+  // A typed TEXT answer (Yes, EMI, FDR …). Typed numbers need no flag: colourTypedCells
+  // recognises any number written without a formula.
+  if (opts.typed) cell.typed = true;
   ws[addr] = cell;
+}
+
+// Typed values and formula results look different on every Verification sheet, so a reader
+// sees at once which numbers were entered and which the workbook works out. A value written in
+// (a form input, or a figure copied from the calculator where Excel cannot rebuild it) turns
+// yellow with blue text; a formula result stays white with black text; headings keep their
+// own colours. DATE(2023,1,10) with plain numbers is a typed date, so it counts as typed.
+// Sl. and Layer numbers only label rows, so they are left alone.
+const TYPED_FILL = 'FFF2CC';
+const TYPED_FONT = '0000FF';
+const typedStyle = (s = {}) => ({ ...s, fill: { patternType: 'solid', fgColor: { rgb: TYPED_FILL } },
+  font: { ...(s.font || {}), color: { rgb: TYPED_FONT } } });
+function colourTypedCells(ws) {
+  if (!ws['!ref']) return;
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const labelCols = new Set();
+  for (let c = range.s.c; c <= range.e.c; c++) {
+    const h = ws[XLSX.utils.encode_cell({ r: range.s.r, c })];
+    if (h && typeof h.v === 'string' && /^(sl\.?|layer)$/i.test(h.v.trim())) labelCols.add(c);
+  }
+  Object.keys(ws).forEach((addr) => {
+    if (addr[0] === '!') return;
+    const cell = ws[addr];
+    const typed = cell.f ? /^DATE\(\d+,\d+,\d+\)$/.test(cell.f)
+      : (cell.t === 'n' && cell.v !== undefined) || cell.typed;
+    delete cell.typed;
+    if (!typed || (cell.s && cell.s.fill) || labelCols.has(XLSX.utils.decode_cell(addr).c)) return;
+    cell.s = typedStyle(cell.s);
+  });
+}
+
+// The Read Me sheet, always the last tab: what the file is, what the colours mean, what each
+// sheet holds, the main formulas, and how to check a number — in plain words.
+const README_SHEETS = {
+  'Inputs & Results': 'The inputs from the calculator, then the results (interest, interest expense, Loan Security Benefit, Net Interest Income, Average Portfolio, NIM, ERR) and a year-by-year summary. A last year shorter than 12 months is scaled up to a full year so it compares with the others.',
+  Rate_Layers: 'The interest rate layers, month by month, and the cost of fund each layer uses. A Refinance Rate layer lends at 5% and is funded at 1%.',
+  Rate_Security_COF_Layers: 'The rate, loan security and cost-of-fund tables by date. Each Schedule row looks up the rate, security and COF in force on its date here.',
+  Schedule: 'The schedule, one row per month. Each row starts from the balance in the row above.',
+};
+function buildReadMeSheet(sheetNames, pageType) {
+  const ws = {};
+  let r = 1;
+  const put = (a, b, sA = null, sB = null) => {
+    setCell(ws, `A${r}`, a, { text: true, s: sA || { font: { bold: true }, alignment: { vertical: 'top', wrapText: true } } });
+    if (b != null) setCell(ws, `B${r}`, b, { text: true, s: sB || { alignment: { vertical: 'top', wrapText: true } } });
+    r++;
+  };
+  const section = (title) => { r++; put(title, '', STYLE.greenHeader, STYLE.greenHeader); };
+  setCell(ws, 'A1', 'Read Me', { text: true, s: STYLE.title });
+  setCell(ws, 'B1', '', { text: true, s: STYLE.title });
+  r = 2;
+  put('What this file is', 'It works out the same numbers as the ERR Calculator with Excel formulas, so anyone can check them cell by cell.');
+  section('What the colours mean');
+  put('Yellow cell, blue text', 'A typed value: an input from the calculator, or a figure copied from it where Excel cannot rebuild it with a formula.',
+    { ...typedStyle({ font: { bold: true } }), alignment: { vertical: 'top' } });
+  put('White cell, black text', 'Worked out by a formula from other cells. Click the cell to see the formula.');
+  put('Green or navy cell', 'A heading.', { ...STYLE.greenHeader, alignment: { vertical: 'top' } });
+  section('The sheets in this file');
+  sheetNames.forEach((n) => { if (README_SHEETS[n]) put(n, README_SHEETS[n]); });
+  put('Read Me', 'This page.');
+  section('The main formulas');
+  if (pageType === 'revisionCustomized') {
+    put('Schedule', 'The dates, installments, interest, principal and balances are the ones in the schedule you uploaded, so they are typed values (yellow).');
+    put('NIM and ERR', 'For an uploaded schedule the calculator works these out from the actual number of days between the dates. This file does not rebuild that yet, so its NIM and ERR cells show 0: use the figures on the calculator\'s screen.');
+  } else {
+    put('Interest', 'Balance at the start of the month × the interest rate ÷ 12.');
+    put('Interest Expense', 'Balance at the start of the month × the cost of fund (COF) ÷ 12.');
+    put('Loan Security Benefit', 'Security amount × (COF − security rate), for the time the security is held.');
+    put('Net Interest Income', 'Interest income + Loan Security Benefit − Interest Expense.');
+    put('Average Portfolio', 'The average of the balances at the start of each month.');
+    put('NIM', 'Net Interest Income ÷ Average Portfolio ÷ the loan\'s length in years.');
+    put('ERR', 'COF + NIM. Where the COF changes during the loan, the COF part is the Effective COF: Interest Expense ÷ Average Portfolio ÷ the loan\'s length in years.');
+  }
+  section('Checking a number');
+  put('See a formula', 'Click any white cell; the formula shows in the bar above the sheet.');
+  put('Try another value', 'Change a yellow cell and every formula that uses it updates. To add or remove a layer, change it in the calculator and download a new file.');
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: r - 2, c: 1 } });
+  ws['!cols'] = [{ wch: 26 }, { wch: 110 }];
+  ws['!merges'] = [];
+  return ws;
+}
+
+// Every Verification workbook ends the same way: colours on each sheet, then Read Me last.
+function writeVerificationWorkbook(wb, filename, pageType) {
+  wb.SheetNames.forEach((n) => colourTypedCells(wb.Sheets[n]));
+  XLSX.utils.book_append_sheet(wb, buildReadMeSheet([...wb.SheetNames], pageType), 'Read Me');
+  XLSX.writeFile(wb, filename, { cellStyles: true });
 }
 
 export function downloadVerificationExcel(filename, ctx) {
@@ -603,7 +693,7 @@ export function downloadVerificationExcel(filename, ctx) {
       else if (isInt) setCell(wsInputs, `B${r}`, value, { z: FMT.ACCOUNTING_INT, s: RIGHT });
       else setCell(wsInputs, `B${r}`, value, { s: RIGHT });
     } else {
-      setCell(wsInputs, `B${r}`, String(value || ''), { text: true, s: RIGHT });
+      setCell(wsInputs, `B${r}`, String(value || ''), { text: true, s: RIGHT, typed: true });
     }
   });
 
@@ -744,7 +834,7 @@ export function downloadVerificationExcel(filename, ctx) {
   }
   XLSX.utils.book_append_sheet(wb, wsSched, 'Schedule');
 
-  XLSX.writeFile(wb, filename, { cellStyles: true });
+  writeVerificationWorkbook(wb, filename, pageType);
 }
 
 // =====================================================================
@@ -1062,7 +1152,7 @@ function downloadRevisionStructuredVerify(filename, ctx) {
     } else if (kind === 'int') {
       setCell(wsI, `D${r}`, value, { z: RR_FMT.NUM0, s: RR_STYLE.cell });
     } else {
-      setCell(wsI, `D${r}`, String(value || ''), { text: true, s: RR_STYLE.cell });
+      setCell(wsI, `D${r}`, String(value || ''), { text: true, s: RR_STYLE.cell, typed: true });
     }
   });
 
@@ -1130,7 +1220,7 @@ function downloadRevisionStructuredVerify(filename, ctx) {
   XLSX.utils.book_append_sheet(wb, wsI, 'Inputs & Results');
   XLSX.utils.book_append_sheet(wb, wsL, 'Rate_Security_COF_Layers');
   XLSX.utils.book_append_sheet(wb, ws, 'Schedule');
-  XLSX.writeFile(wb, filename, { cellStyles: true });
+  writeVerificationWorkbook(wb, filename, 'revisionStructured');
 }
 
 // Build the Rate_Security_COF_Layers worksheet. Three side-by-side tables; the Schedule
@@ -1198,7 +1288,7 @@ function buildLayersSheet(rateLayers, securityLayers, cofRecs, includeLending = 
   securityLayers.forEach((l) => {
     const secs = (l.securities && l.securities.length) ? l.securities : [{ amount: l.amount, rate: l.activeRate }];
     secs.forEach((s) => {
-      setCell(wsL, `W${br}`, fmtDateDMY(l.fromDate), { text: true, s: RR_STYLE.cell });
+      setCell(wsL, `W${br}`, fmtDateDMY(l.fromDate), { text: true, s: RR_STYLE.cell, typed: true });
       numCell(`X${br}`, s.amount || 0);
       pctCell(`Y${br}`, s.rate || 0);
       br++;
@@ -1234,7 +1324,7 @@ function buildRateLayersSheet(layers, cofRef) {
     setCell(ws, `A${r}`, i + 1, { s: STYLE.cellCenter });
     setCell(ws, `B${r}`, L.fromMonth, { s: STYLE.cellCenter });
     setCell(ws, `C${r}`, L.toMonth, { s: STYLE.cellCenter });
-    setCell(ws, `D${r}`, L.rateType, { text: true, s: STYLE.cellCenter });
+    setCell(ws, `D${r}`, L.rateType, { text: true, s: STYLE.cellCenter, typed: true });
     setCell(ws, `E${r}`, refi ? REFINANCE_LENDING_RATE : (L.rate || 0), { z: FMT.PCT2, s: STYLE.cellCenter });
     if (refi || !cofRef) setCell(ws, `F${r}`, refi ? REFINANCE_COF : 0, { z: FMT.PCT2, s: STYLE.cellCenter });
     else setCell(ws, `F${r}`, 0, { f: cofRef, z: FMT.PCT2, s: STYLE.cellCenter });
