@@ -1,6 +1,6 @@
 // Excel / Word / PDF I/O via CDN libs
-import { formatMoney as fmtM, formatPercent as fmtP } from './formatting.js?v=20261102a';
-import { SPLIT_MODE, REFINANCE_RATE, REFINANCE_LENDING_RATE, REFINANCE_COF } from './calculations.js?v=20261102a';
+import { formatMoney as fmtM, formatPercent as fmtP } from './formatting.js?v=20261102b';
+import { SPLIT_MODE, REFINANCE_RATE, REFINANCE_LENDING_RATE, REFINANCE_COF } from './calculations.js?v=20261102b';
 
 // Funded Security as it READS on screen. The stored value is always "<kind> after Moratorium",
 // but on a loan with no moratorium the UI shows "<kind> Installment" — the workbook quotes the
@@ -356,7 +356,7 @@ function buildReadMeSheet(sheetNames, pageType, notes = {}) {
     put('NIM', 'Net Interest Income ÷ Average Portfolio ÷ the loan\'s length in years.');
     put('ERR', 'COF + NIM. Where the COF changes during the loan, the COF part is the Effective COF: Interest Expense ÷ Average Portfolio ÷ the loan\'s length in years.');
     if (notes.newInstallment) {
-      put('New Installment security', 'Worth the first installment after its From Date, to the cent: in the Loan Security — Breakdown table it is a formula on that Schedule row, so it always equals the installment shown there, and its layer\'s Amount and Active Rate add up the breakdown.');
+      put('Immediate Installment security', 'Worth the first installment after its From Date, to the cent: in the Loan Security — Breakdown table it is a formula on that Schedule row, so it always equals the installment shown there, and its layer\'s Amount and Active Rate add up the breakdown.');
     }
   }
   section('Checking a number');
@@ -1282,7 +1282,7 @@ function buildLayersSheet(rateLayers, securityLayers, cofRecs, includeLending = 
 
   // Table 2 — Loan Security Layers (G:M). The most recent active layer wins: its Amount is the
   // balance in effect (a total, not an increment) and its Active Rate is the rate in effect.
-  // A layer holding a "New Installment" security adds up its rows of the breakdown (Table 4),
+  // A layer holding an "Immediate Installment" security adds up its rows of the breakdown (Table 4),
   // where that security is a formula on its Schedule row — so it follows a changed rate.
   const secsOf = (l) => ((l.securities && l.securities.length) ? l.securities : [{ amount: l.amount, rate: l.activeRate }]);
   const isLinked = (x) => x.newInst && x.instSl != null;
@@ -1304,7 +1304,7 @@ function buildLayersSheet(rateLayers, securityLayers, cofRecs, includeLending = 
       numCell(`K${r}`, l.amount || 0);
       pctCell(`L${r}`, l.activeRate || 0);
     }
-    setCell(wsL, `M${r}`, `Loan Security ${i + 1}${linked ? ' (incl. New Installment)' : ''}`, { text: true, s: RR_STYLE.cell });
+    setCell(wsL, `M${r}`, `Loan Security ${i + 1}${linked ? ' (incl. Immediate Installment)' : ''}`, { text: true, s: RR_STYLE.cell });
   });
 
   // Table 3 — COF + ISC Layers (O:U). Year/Month/Day are integers; Eligible COF = MAX(COF,ISC)+0.3%.
@@ -1324,7 +1324,7 @@ function buildLayersSheet(rateLayers, securityLayers, cofRecs, includeLending = 
 
   // Table 4 — Loan Security breakdown (W:Y). Each individual security behind the combined rows in
   // G:M (where K = Σ these amounts and L = the amount-weighted-average of these rates). The
-  // Schedule never references this table; only a layer with a "New Installment" security adds
+  // Schedule never references this table; only a layer with an "Immediate Installment" security adds
   // its rows up in G:M. That security's amount is the installment on its Schedule row (C, the
   // row of Sl. n is n + 2), to the cent.
   title('W1', 'Loan Security — Breakdown');

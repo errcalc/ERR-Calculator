@@ -1,5 +1,5 @@
 // Reusable UI component builders (returns DOM nodes)
-import { attachCommaFormatter, sanitizeDecimalString, formatTwoDecimalsOnBlur } from './formatting.js?v=20261102a';
+import { attachCommaFormatter, sanitizeDecimalString, formatTwoDecimalsOnBlur } from './formatting.js?v=20261102b';
 
 let uid = 0;
 const nextId = () => `f${++uid}`;
@@ -897,7 +897,7 @@ export function securityLayersField({ label, name, help = '', getAnchor = null, 
   let data = []; // [{ fromDate: ISO|null, securities: [{ amount:Number, rate:Number(decimal), newInst?:true }] }]
   const money2 = (n) => (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const rowTotal = (r) => (r.securities || []).reduce((s, x) => s + (Number(x.amount) || 0), 0);
-  // A security marked "New Installment" (newInst) is worth the first installment after its row's
+  // A security marked "Immediate Installment" (newInst) is worth the first installment after its row's
   // From Date — the new installment once the rate is revised on that date. The page works it out
   // from the schedule: getNewInstallment(date) while the popup is open, resolveNewInstallments()
   // on every recalculation. Until the schedule can be built, its amount is pending.
@@ -943,8 +943,8 @@ export function securityLayersField({ label, name, help = '', getAnchor = null, 
       tableWrap.appendChild(el('div', { class: 'sec-row' },
         el('div', { class: 'sec-vals' },
           el('div', {}, dmy(r.fromDate)),
-          el('div', {}, isPending(r) ? 'New installment pending' : money2(rowTotal(r)),
-            hasLinked(r) && !isPending(r) ? el('span', { class: 'sec-note' }, 'incl. New Installment') : null),
+          el('div', {}, isPending(r) ? 'Immediate installment pending' : money2(rowTotal(r)),
+            hasLinked(r) && !isPending(r) ? el('span', { class: 'sec-note' }, 'incl. Immediate Installment') : null),
           el('div', {}, (rowRate(r) * 100).toFixed(2) + '%')),
         el('div', { class: 'sec-acts' }, editBtn, delBtn)));
     });
@@ -957,7 +957,7 @@ export function securityLayersField({ label, name, help = '', getAnchor = null, 
     if (isNew && !work.fromDate && data.length === 0 && getAnchor) { const a = getAnchor(); if (a && a.value) work.fromDate = a.value; }
     if (!work.securities.length) work.securities.push({ amount: null, rate: null });
 
-    // A changed From Date moves every "New Installment" amount to the installment after it.
+    // A changed From Date moves every "Immediate Installment" amount to the installment after it.
     const refillLinked = () => entryRows.forEach((r) => { if (r.newInst) r.setLinked(true); });
     const dateF = dateField({ label: 'From Date', name: 'secFromDate', onChange: () => refillLinked() });
     dateF.input.addEventListener('change', () => refillLinked());
@@ -976,7 +976,7 @@ export function securityLayersField({ label, name, help = '', getAnchor = null, 
       if (getNewInstallment) {
         // Fills the amount with the first installment after the From Date and keeps it there.
         // Typing an amount of your own ends the link; pressing the button again restores it.
-        const niBtn = el('button', { type: 'button', class: 'sec-ni-btn', title: 'Use the first installment after the From Date' }, 'New Installment');
+        const niBtn = el('button', { type: 'button', class: 'sec-ni-btn', title: 'Use the first installment after the From Date' }, 'Immediate Installment');
         const niNote = el('div', { class: 'help sec-ni-note' });
         api.setLinked = (on) => {
           api.newInst = on;
@@ -1011,7 +1011,7 @@ export function securityLayersField({ label, name, help = '', getAnchor = null, 
       { yesLabel: 'Yes, discard', danger: true, onYes: closeEditor }));
     saveBtn.addEventListener('click', () => {
       const fromDate = dateF.getValue();
-      // A "New Installment" security may still be waiting for its amount — it is kept anyway.
+      // An "Immediate Installment" security may still be waiting for its amount — it is kept anyway.
       const securities = entryRows.map((r) => ({ amount: r.amt.getValue(), rate: r.rate.getValue(), ...(r.newInst ? { newInst: true } : {}) }))
         .filter((s) => s.newInst || (s.amount != null && s.amount > 0));
       if (!fromDate) return toast('Enter the From Date.', 'error');
@@ -1032,7 +1032,7 @@ export function securityLayersField({ label, name, help = '', getAnchor = null, 
     const card = el('div', { class: 'sec-edit' },
       el('div', { class: 'sec-edit-head' }, el('h3', {}, isNew ? 'Add Loan Security' : 'Edit Loan Security')),
       el('p', { class: 'help' }, 'Choose the date this security applies from, then add one or more securities (amount + rate) for that date.'
-        + (getNewInstallment ? ' “New Installment” makes a security equal to the first installment after that date.' : '')),
+        + (getNewInstallment ? ' “Immediate Installment” makes a security equal to the first installment after that date.' : '')),
       el('div', { class: 'sec-edit-date' }, dateF),
       el('div', { class: 'sec-entry sec-entry-head' }, el('div', {}, 'Outstanding Amount'), el('div', {}, 'Interest Rate'), el('div', {}, '')),
       entriesWrap, addEntry,

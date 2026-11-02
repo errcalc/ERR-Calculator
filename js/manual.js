@@ -1,6 +1,6 @@
 // Per-module user guide — opened from the info button in the header. Plain, simple language
 // (explained as if to a 10-year-old). Sections are collapsed by default; click to expand.
-import { el, openModal, closeModal } from './components.js?v=20261102a';
+import { el, openModal, closeModal } from './components.js?v=20261102b';
 
 // ---- Shared sections reused across modules ----
 const MODALITY_BULLETS = [
@@ -77,7 +77,7 @@ const SECURITY_LAYERS_SECTION = {
     'Type the full balance for that date (a total, not an addition). The most recent row applies until the next row’s date.',
     'The bank earns the gap between the cost of fund and the security’s rate — this is the Loan Security Benefit.',
     'If the balance changes on a day that is not a payment day, the system splits that month by the exact number of days, so the benefit is correct.',
-    'New Installment — when a new security should equal the installment after a rate change, press “New Installment” under its amount. It takes the first installment after the row’s From Date (use the rate change date) and keeps following it if you change the inputs. You can still type your own amount; pressing the button again puts it back.',
+    'Immediate Installment — when a new security should equal the installment after a rate change, press “Immediate Installment” under its amount. It takes the first installment after the row’s From Date (use the rate change date) and keeps following it if you change the inputs. You can still type your own amount; pressing the button again puts it back.',
   ],
 };
 const REFERENCE_SECTION = {
