@@ -728,10 +728,25 @@ export function days360(startISO, endISO) {
   const [sy, sm, sdRaw] = String(startISO).split('-').map(Number);
   const [ey, em, edRaw] = String(endISO).split('-').map(Number);
   let sd = sdRaw, ed = edRaw;
-  if (sd === 31) sd = 30;
+  const lastOfFeb = sm === 2 && sd === new Date(Date.UTC(sy, 2, 0)).getUTCDate();
+  if (sd === 31 || lastOfFeb) sd = 30;
   if (ed === 31 && sd === 30) ed = 30;
   return (ey - sy) * 360 + (em - sm) * 30 + (ed - sd);
 }
+
+// Calendar days from one ISO date to another (Actual/360 counts these).
+export function actualDays(startISO, endISO) {
+  return Math.round((Date.parse(endISO) - Date.parse(startISO)) / 86400000);
+}
+
+// How the bank's core system (CBS) product counts a period's interest — the first question of
+// Rate Revision. 'nominal' is the original rule: rate ÷ interest payments a year (12 monthly,
+// 4 quarterly, 2 half-yearly), with a revision inside a period split by DAYS360.
+export const CBS_PRODUCTS = [
+  { value: 'days360', label: 'DAYS360(Start Date, End Date)/360', short: 'DAYS360/360' },
+  { value: 'act360', label: 'Actual/360', short: 'Actual/360' },
+  { value: 'nominal', label: 'Accrued Interest/X (X = 12 monthly, 4 quarterly, 2 half-yearly)', short: 'Accrued Interest/X' },
+];
 
 export function buildRateRevisionStructured(p) {
   const {
@@ -750,9 +765,13 @@ export function buildRateRevisionStructured(p) {
     principalPeriod = null,
     principalBasis = 'fixed',
     customPrincipals = [],
+    dayCount = 'nominal',   // CBS product: 'nominal' | 'days360' | 'act360' (client interest only)
   } = p;
 
   const isSplit = !!(interestPeriod && principalPeriod);
+  // Days in a stretch of the client's interest: Actual/360 counts calendar days; DAYS360 and
+  // the original rule's mid-period splits use Excel's DAYS360.
+  const daysIn = dayCount === 'act360' ? actualDays : days360;
   // Principal dates and the divisor that keeps the payments equal (maturity included).
   // Split legs count from the month after the moratorium, like buildSplitSchedule.
   const splitPDates = isSplit ? principalPaymentMonths(moratoriumMonths + 1, tenorMonths, principalPeriod) : [];
@@ -788,24 +807,28 @@ export function buildRateRevisionStructured(p) {
     return result;
   }
   // Interest earned over an accrual period (startISO, endISO] on a constant balance.
-  // If no rate layer takes effect strictly inside the period, the nominal convention
-  // applies: balance * rate-at-period-start / nominalDivisor (12 monthly, 4 quarterly).
+  // If no rate layer takes effect strictly inside the period: under the original rule,
+  // balance * rate-at-period-start / nominalDivisor (12 monthly, 4 quarterly); under a
+  // day-count product, balance * rate * days / 360 (DAYS360 or actual days).
   // If a revision's From Date falls inside the period (a non-due date), the period is
-  // split into day-count segments: balance * rate_i * DAYS360(segStart,segEnd) / 360 per
-  // segment — the fractional-interest treatment from the rectified file (Excel DAYS360 basis).
+  // split into segments: balance * rate_i * days(segStart,segEnd) / 360 per segment — the
+  // fractional-interest treatment from the rectified file (DAYS360 unless Actual/360).
   function periodInterest(balance, startISO, endISO, nominalDivisor) {
     const cuts = [...new Set((rateLayers || [])
       .map(l => l.fromDate)
       .filter(fd => fd && fd > startISO && fd < endISO))].sort();
     if (!cuts.length) {
-      return { interest: balance * getRateOn(startISO) / nominalDivisor, segments: null };
+      const interest = dayCount === 'nominal'
+        ? balance * getRateOn(startISO) / nominalDivisor
+        : balance * getRateOn(startISO) * daysIn(startISO, endISO) / 360;
+      return { interest, segments: null };
     }
     const bounds = [startISO, ...cuts, endISO];
     const segments = [];
     let interest = 0;
     for (let i = 0; i < bounds.length - 1; i++) {
       const segStart = bounds[i], segEnd = bounds[i + 1];
-      const days = days360(segStart, segEnd);
+      const days = daysIn(segStart, segEnd);
       const rate = getRateOn(segStart);
       interest += balance * rate / 360 * days;
       segments.push({ rate, from: segStart, to: segEnd, days });
@@ -839,6 +862,27 @@ export function buildRateRevisionStructured(p) {
   });
 
   let accruedReceivable = 0;
+  // EMI/EQI under a day-count product: ONE installment per rate stretch, found by goal seek so
+  // the balance ends at exactly 0 (each period's interest counted by days), kept for every later
+  // payment — the last one included — and found again only when the rate changes (user,
+  // 09-Nov-2026). blockX is that installment, blockRate the rate it was found at.
+  let blockX = null, blockRate = null;
+  // X for `n` payments from month m: this period's interest is already known (it may be split
+  // by a revision); every later period earns `rate` for its own days on the balance left.
+  //   B1 = B0 + I1 - X,  Bk = B(k-1) * (1 + f_k) - X,  Bn = 0  =>  X = (B0 + I1) * P / S
+  // with f_k = rate * days_k / 360, P = product of (1 + f_k) for k = 2..n and S the sum, for
+  // j = 1..n, of the product of (1 + f_k) for k = j+1..n. Quarterly dates run on past maturity
+  // when the last quarter is a phantom one, exactly as the original rule sizes it.
+  function goalSeekInstallment(balance, firstInterest, m, step, n, rate) {
+    const growth = [];
+    for (let k = 2; k <= n; k++) {
+      const a = fmt(addMonths(start, m + (k - 2) * step)), b = fmt(addMonths(start, m + (k - 1) * step));
+      growth.push(1 + rate * daysIn(a, b) / 360);
+    }
+    let tail = 1, sum = 1;            // j = n contributes the empty product, 1
+    for (let k = growth.length - 1; k >= 0; k--) { tail *= growth[k]; sum += tail; }
+    return (balance + firstInterest) * tail / sum;
+  }
 
   for (let m = 1; m <= tenorMonths; m++) {
     const d = fmt(addMonths(start, m));
@@ -848,7 +892,7 @@ export function buildRateRevisionStructured(p) {
     const cofPm = getCofOn(d);
     const sec = getSecurityOn(d); // security uses the current month's date
 
-    let installment = 0, interest = 0, principal = 0;
+    let installment = 0, interest = 0, principal = 0, xStart = false;
     // rowRate: rate shown/used for this row's accrual (period-start rate; after a
     // mid-period revision the row carries the NEW rate so block logic continues from it).
     let rowRate = getRateOn(accrualStart), splitSegments = null, splitFromSl, stubMonthsOut;
@@ -934,7 +978,18 @@ export function buildRateRevisionStructured(p) {
         const rateAtStart = getRateOn(periodStartISO);
         rowRate = pi.segments ? getRateOn(d) : rateAtStart;
         if (pi.segments) { splitSegments = pi.segments; splitFromSl = m - step; }
-        if (paymentModality === 'EMI' || paymentModality === 'EQI') {
+        if ((paymentModality === 'EMI' || paymentModality === 'EQI') && dayCount !== 'nominal') {
+          // Goal seek once per rate stretch (see goalSeekInstallment); a period that a revision
+          // splits starts a new stretch at the new rate.
+          const rateOn = pi.segments ? getRateOn(d) : rateAtStart;
+          if (blockX === null || pi.segments || rateOn !== blockRate) {
+            blockX = goalSeekInstallment(urpa, interest, m, step, remainingPayments, rateOn);
+            blockRate = rateOn;
+            xStart = true;
+          }
+          installment = blockX;
+          principal = installment - interest;
+        } else if (paymentModality === 'EMI' || paymentModality === 'EQI') {
           if (pi.segments) {
             // Mid-period revision: derive the constant installment X that amortises the
             // balance to exactly 0 at maturity given this period's split interest and the
@@ -995,6 +1050,7 @@ export function buildRateRevisionStructured(p) {
       idpReceivable: accruedReceivable,
       splitSegments: splitSegments || undefined, splitFromSl,
       stubMonths: stubMonthsOut,
+      xStart: xStart || undefined,   // a goal-sought installment begins here (day-count products)
     });
   }
 

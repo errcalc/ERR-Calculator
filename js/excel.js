@@ -1,6 +1,6 @@
 // Excel / Word / PDF I/O via CDN libs
-import { formatMoney as fmtM, formatPercent as fmtP } from './formatting.js?v=20261102b';
-import { SPLIT_MODE, REFINANCE_RATE, REFINANCE_LENDING_RATE, REFINANCE_COF } from './calculations.js?v=20261102b';
+import { formatMoney as fmtM, formatPercent as fmtP } from './formatting.js?v=20261109b';
+import { SPLIT_MODE, REFINANCE_RATE, REFINANCE_LENDING_RATE, REFINANCE_COF, CBS_PRODUCTS } from './calculations.js?v=20261109b';
 
 // Funded Security as it READS on screen. The stored value is always "<kind> after Moratorium",
 // but on a loan with no moratorium the UI shows "<kind> Installment" — the workbook quotes the
@@ -218,7 +218,7 @@ export function downloadScheduleAsPDF(filename, schedule, meta = {}) {
 
 // =====================================================================
 // Verify Calculation Excel — exactly mirrors "Sample format for verification.xlsx"
-// Styling: navy title, grey section headers with navy text, accounting/percent
+// Styling: navy title, green section headers, accounting/percent
 // number formats matching sample, formulas linking Results -> Inputs + Schedule.
 // =====================================================================
 const FMT = {
@@ -227,10 +227,10 @@ const FMT = {
   PCT2: '0.00%',
   PCT4: '0.0000%',
 };
-// Mild corporate palette, shared by every Verification sheet: navy title bar, grey headings
-// with navy text, light blue typed cells (TYPED_FILL below), white formula cells.
-const NAVY = '1F3864';
-const HEAD_FILL = 'D9D9D9';
+// The original look, back by the user's choice (09-Nov-2026): navy title bar, green headings,
+// every other cell plain white — typed and formula cells alike.
+const NAVY = '002060';
+const GREEN = '00B050';
 const WHITE_BOLD = { bold: true, color: { rgb: 'FFFFFF' }, sz: 11 };
 const STYLE = {
   title: {
@@ -239,16 +239,16 @@ const STYLE = {
     alignment: { horizontal: 'center', vertical: 'center' },
   },
   header: {
-    font: { bold: true, color: { rgb: NAVY }, sz: 11 },
-    fill: { fgColor: { rgb: HEAD_FILL } },
+    font: WHITE_BOLD,
+    fill: { fgColor: { rgb: GREEN } },
     alignment: { horizontal: 'center', vertical: 'center' },
   },
   cellCenter: { alignment: { horizontal: 'center' } },
 };
 const RIGHT = { alignment: { horizontal: 'right' } };
 
-// Rate Revision verification look (the rectified file's layout): bigger navy title, grey
-// banners/headers with navy text. Number formats are the plain red-negative variants used on
+// Rate Revision verification look (matches the rectified file): bigger navy title, green
+// banners/headers with DARK text. Number formats are the plain red-negative variants used on
 // the Inputs/Results/Layers sheets (the Schedule keeps the accounting format above).
 const RR_FMT = {
   NUM2: '#,##0.00_);[Red](#,##0.00)',
@@ -261,9 +261,9 @@ const RR_FMT = {
 };
 const RR_STYLE = {
   title: { font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 16 }, fill: { fgColor: { rgb: NAVY } }, alignment: { horizontal: 'center', vertical: 'center' } },
-  subtitle: { font: { bold: true, color: { rgb: NAVY }, sz: 11 }, fill: { fgColor: { rgb: HEAD_FILL } }, alignment: { horizontal: 'center', vertical: 'center' } },
-  banner: { font: { bold: true, color: { rgb: NAVY }, sz: 14 }, fill: { fgColor: { rgb: HEAD_FILL } }, alignment: { horizontal: 'center', vertical: 'center' } },
-  colHead: { font: { bold: true, color: { rgb: NAVY }, sz: 11 }, fill: { fgColor: { rgb: HEAD_FILL } }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true } },
+  subtitle: { font: { bold: true, color: { rgb: '000000' }, sz: 11 }, fill: { fgColor: { rgb: GREEN } }, alignment: { horizontal: 'center', vertical: 'center' } },
+  banner: { font: { bold: true, color: { rgb: '000000' }, sz: 14 }, fill: { fgColor: { rgb: GREEN } }, alignment: { horizontal: 'center', vertical: 'center' } },
+  colHead: { font: { bold: true, color: { rgb: '000000' }, sz: 11 }, fill: { fgColor: { rgb: GREEN } }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true } },
   cell: { alignment: { horizontal: 'center', vertical: 'center' } },
 };
 
@@ -279,24 +279,19 @@ function setCell(ws, addr, value, opts = {}) {
   // style, so passing STYLE.cellCenter alongside a percent format turned every later
   // cellCenter cell into a percentage (Rate_Layers showed layer 2 / month 4 as 200% / 400%).
   if (opts.s) cell.s = { ...opts.s };
-  // A typed TEXT answer (Yes, EMI, FDR …). Typed numbers need no flag: colourTypedCells
+  // A typed TEXT answer (Yes, EMI, FDR …). Typed numbers need no flag: markTypedCells
   // recognises any number written without a formula.
   if (opts.typed) cell.typed = true;
   ws[addr] = cell;
 }
 
-// Typed values and formula results look different on every Verification sheet, so a reader
-// sees at once which numbers were entered and which the workbook works out. A value written in
-// (a form input, or a figure copied from the calculator where Excel cannot rebuild it) turns
-// light blue with dark blue text; a formula result stays white with black text; headings keep their
-// own colours. DATE(2023,1,10) with plain numbers is a typed date, so it counts as typed.
-// Sl. and Layer numbers only label rows, so they are left alone.
-const TYPED_FILL = 'DDEBF7';
-const TYPED_FONT = '1F4E79';
-const typedStyle = (s = {}) => ({ ...s, fill: { patternType: 'solid', fgColor: { rgb: TYPED_FILL } },
-  font: { ...(s.font || {}), color: { rgb: TYPED_FONT } } });
-function colourTypedCells(ws) {
-  if (!ws['!ref']) return;
+// The typed values of a sheet — the only cells left unlocked. A value written in (a form input,
+// or a figure copied from the calculator where Excel cannot rebuild it) is typed; so is
+// DATE(2023,1,10) with plain numbers. Formula results, headings (they carry a fill) and the Sl.
+// and Layer numbers, which only label rows, stay locked. Returns the cell addresses.
+function markTypedCells(ws) {
+  const out = [];
+  if (!ws['!ref']) return out;
   const range = XLSX.utils.decode_range(ws['!ref']);
   const labelCols = new Set();
   for (let c = range.s.c; c <= range.e.c; c++) {
@@ -310,11 +305,12 @@ function colourTypedCells(ws) {
       : (cell.t === 'n' && cell.v !== undefined) || cell.typed;
     delete cell.typed;
     if (!typed || (cell.s && cell.s.fill) || labelCols.has(XLSX.utils.decode_cell(addr).c)) return;
-    cell.s = typedStyle(cell.s);
+    out.push(addr);
   });
+  return out;
 }
 
-// The Read Me sheet, always the last tab: what the file is, what the colours mean, what each
+// The Read Me sheet, always the last tab: what the file is, which cells can be changed, what each
 // sheet holds, the main formulas, and how to check a number — in plain words.
 const README_SHEETS = {
   'Inputs & Results': 'The inputs from the calculator, then the results (interest, interest expense, Loan Security Benefit, Net Interest Income, Average Portfolio, NIM, ERR) and a year-by-year summary. A last year shorter than 12 months is scaled up to a full year so it compares with the others.',
@@ -335,20 +331,22 @@ function buildReadMeSheet(sheetNames, pageType, notes = {}) {
   setCell(ws, 'B1', '', { text: true, s: STYLE.title });
   r = 2;
   put('What this file is', 'It works out the same numbers as the ERR Calculator with Excel formulas, so anyone can check them cell by cell.');
-  section('What the colours mean');
-  put('Light blue cell', 'A typed value you can change: an input from the calculator, or a figure copied from it where Excel cannot rebuild it with a formula.',
-    { ...typedStyle({ font: { bold: true } }), alignment: { vertical: 'top' } });
-  put('White cell', 'Worked out by a formula from other cells. Click the cell to see the formula.');
-  put('Grey or navy cell', 'A heading.', { ...STYLE.header, alignment: { vertical: 'top' } });
+  section('The cells');
+  put('Typed values', 'The inputs from the calculator, and figures copied from it where Excel cannot rebuild them with a formula. These are the only cells you can change.');
+  put('Formula cells', 'Worked out from other cells. They are locked, so a formula cannot be typed over by mistake. Click one to see its formula.');
+  put('Green or navy cell', 'A heading.', { ...STYLE.header, alignment: { vertical: 'top' } });
   section('The sheets in this file');
   sheetNames.forEach((n) => { if (README_SHEETS[n]) put(n, README_SHEETS[n]); });
   put('Read Me', 'This page.');
   section('The main formulas');
   if (pageType === 'revisionCustomized') {
-    put('Schedule', 'The dates, installments, interest, principal and balances are the ones in the schedule you uploaded, so they are typed values (light blue).');
+    put('Schedule', 'The dates, installments, interest, principal and balances are the ones in the schedule you uploaded, so they are typed values.');
     put('NIM and ERR', 'For an uploaded schedule the calculator works these out from the actual number of days between the dates. This file does not rebuild that yet, so its NIM and ERR cells show 0: use the figures on the calculator\'s screen.');
   } else {
-    put('Interest', 'Balance at the start of the month × the interest rate ÷ 12.');
+    put('Interest', notes.interestRule || 'Balance at the start of the month × the interest rate ÷ 12.');
+    if (notes.goalSeek) {
+      put('EMI / EQI', 'The first installment of each rate stretch is a typed value, found by goal seek so the last balance is 0; the installments after it refer to it, so they are all the same. To check it: Data → What-If Analysis → Goal Seek, set the last URPA to 0 by changing that first installment.');
+    }
     put('Interest Expense', 'Balance at the start of the month × the cost of fund (COF) ÷ 12.');
     put('Loan Security Benefit', 'Security amount × (COF − security rate), for the time the security is held.');
     put('Net Interest Income', 'Interest income + Loan Security Benefit − Interest Expense.');
@@ -360,41 +358,63 @@ function buildReadMeSheet(sheetNames, pageType, notes = {}) {
     }
   }
   section('Checking a number');
-  put('See a formula', 'Click any white cell; the formula shows in the bar above the sheet.');
-  put('Try another value', 'Change a light blue cell and every formula that uses it updates. To add or remove a layer, change it in the calculator and download a new file.');
-  put('Locked cells', 'Only the light blue cells can be changed. Everything else is locked, so a formula cannot be typed over by mistake; you can still widen columns. To unlock a sheet: Review → Unprotect Sheet (there is no password).');
+  put('See a formula', 'Click a formula cell; the formula shows in the bar above the sheet.');
+  put('Try another value', 'Change a typed value and every formula that uses it updates. To add or remove a layer, change it in the calculator and download a new file.');
+  put('Locked cells', 'Only the typed values can be changed. Everything else is locked, so a formula cannot be typed over by mistake; you can still widen columns. To unlock a sheet: Review → Unprotect Sheet (there is no password).');
   ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: r - 2, c: 1 } });
   ws['!cols'] = [{ wch: 26 }, { wch: 110 }];
   ws['!merges'] = [];
   return ws;
 }
 
-// Every Verification workbook ends the same way: colours on each sheet, then Read Me last, and
-// every sheet locked except its light blue typed cells, so a formula cannot be typed over by
-// accident (columns and rows still resize; Review → Unprotect Sheet needs no password). The style
-// writer cannot mark a cell unlocked, so the finished file is opened once more and every cell
-// style that carries the typed fill gets <protection locked="0"/>.
+// Every Verification workbook ends the same way: Read Me last, and every sheet locked except its
+// typed values, so a formula cannot be typed over by accident (columns and rows still resize;
+// Review → Unprotect Sheet needs no password). The style writer cannot mark a cell unlocked, so
+// the finished file is opened once more and each typed cell is moved onto an unlocked copy of
+// its own style — it looks exactly the same.
 function writeVerificationWorkbook(wb, filename, pageType, notes = {}) {
-  wb.SheetNames.forEach((n) => colourTypedCells(wb.Sheets[n]));
+  const typed = wb.SheetNames.map((n) => markTypedCells(wb.Sheets[n]));
   XLSX.utils.book_append_sheet(wb, buildReadMeSheet([...wb.SheetNames], pageType, notes), 'Read Me');
   wb.SheetNames.forEach((n) => { wb.Sheets[n]['!protect'] = { formatColumns: false, formatRows: false }; });
   const zip = XLSX.CFB.read(new Uint8Array(XLSX.write(wb, { bookType: 'xlsx', type: 'array', cellStyles: true })), { type: 'array' });
-  const styles = zip.FileIndex[zip.FullPaths.findIndex(p => /\/xl\/styles\.xml$/i.test(p))];
-  styles.content = new TextEncoder().encode(unlockTypedStyles(new TextDecoder().decode(styles.content)));
-  styles.size = styles.content.length;
+  const part = (re) => zip.FileIndex[zip.FullPaths.findIndex((f) => re.test(f))];
+  const read = (f) => new TextDecoder().decode(f.content);
+  const write = (f, xml) => { f.content = new TextEncoder().encode(xml); f.size = f.content.length; };
+  const styles = part(/\/xl\/styles\.xml$/i);
+  const unlocked = unlockedStyles(read(styles));
+  typed.forEach((cells, k) => {
+    if (!cells.length) return;
+    const sheet = part(new RegExp(`/xl/worksheets/sheet${k + 1}\\.xml$`, 'i'));
+    write(sheet, unlockCells(read(sheet), new Set(cells), unlocked.copyOf));
+  });
+  write(styles, unlocked.xml());
   const out = XLSX.CFB.write(zip, { fileType: 'zip', type: 'array', compression: true });
   saveBlob(new Blob([new Uint8Array(out)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), filename);
 }
 
-// styles.xml: every cell style (xf) whose fill is the typed fill becomes unlocked.
-function unlockTypedStyles(xml) {
-  const fills = ((xml.match(/<fills[^>]*>([\s\S]*?)<\/fills>/) || [])[1] || '').match(/<fill>[\s\S]*?<\/fill>/g) || [];
-  const typed = new Set(fills.flatMap((f, i) => (f.includes(`rgb="FF${TYPED_FILL}"`) ? [i] : [])));
-  return xml.replace(/<cellXfs[^>]*>[\s\S]*?<\/cellXfs>/, (block) => block.replace(
-    /<xf\b([^>]*?)(?:\/>|>([\s\S]*?)<\/xf>)/g, (xf, attrs, inner = '') => {
-      const fillId = Number((attrs.match(/fillId="(\d+)"/) || [])[1]);
-      return typed.has(fillId) ? `<xf${attrs} applyProtection="1">${inner}<protection locked="0"/></xf>` : xf;
-    }));
+// styles.xml: hands out, for any cell style (xf) number, an unlocked copy appended to cellXfs.
+function unlockedStyles(xml) {
+  const block = xml.match(/<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/);
+  const xfs = block[1].match(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g) || [];
+  const copies = new Map();
+  return {
+    copyOf(id) {
+      if (!copies.has(id)) {
+        const [whole, attrs, selfClosing] = xfs[id].match(/^<xf\b([^>]*?)(\/?)>/);
+        const inner = selfClosing ? '' : xfs[id].slice(whole.length, -'</xf>'.length);
+        xfs.push(`<xf${attrs} applyProtection="1">${inner}<protection locked="0"/></xf>`);
+        copies.set(id, xfs.length - 1);
+      }
+      return copies.get(id);
+    },
+    xml: () => xml.replace(block[0], `<cellXfs count="${xfs.length}">${xfs.join('')}</cellXfs>`),
+  };
+}
+
+// A sheet's XML: each listed cell takes the unlocked copy of its style (the writer gives every
+// cell an s="" attribute).
+function unlockCells(xml, cells, copyOf) {
+  return xml.replace(/<c r="([A-Z]+\d+)" s="(\d+)"/g, (c, ref, id) => (cells.has(ref) ? `<c r="${ref}" s="${copyOf(Number(id))}"` : c));
 }
 
 export function downloadVerificationExcel(filename, ctx) {
@@ -880,6 +900,13 @@ function downloadRevisionStructuredVerify(filename, ctx) {
   const mora = params.moratoriumMonths || 0;
   const capitalize = (params.capFlags || []).some(Boolean);
   const pct = (v) => `${+(Number(v) * 100).toFixed(6)}%`; // inline percent literal, e.g. 0.14 -> "14%"
+  // CBS Product: how each period's client interest is counted. Under DAYS360 and Actual/360 the
+  // interest formulas count the days between the period's two date cells over 360, and an
+  // EMI/EQI is the goal-sought installment, written as a value where each rate stretch begins.
+  const dayCount = params.dayCount || 'nominal';
+  const dayMode = dayCount !== 'nominal';
+  const daysExpr = (a, b) => (dayCount === 'act360' ? `(${b}-${a})` : `DAYS360(${a},${b})`);
+  const product = CBS_PRODUCTS.find((x) => x.value === dayCount);
 
   // Layer tables live on the Rate_Security_COF_Layers sheet (rows 3+). The Schedule cell-references
   // them by date so edits to a rate / amount / COF value flow straight into the schedule (point 3).
@@ -912,6 +939,7 @@ function downloadRevisionStructuredVerify(filename, ctx) {
       ['Principal Payment Frequency', inputs.rrPrinFreq ?? '', 'text'],
       ['Principal Amount', inputs.rrPrinBasis ?? '', 'text'],
     ] : []),
+    ...(product ? [['CBS Product for the Schedule', product.label, 'text']] : []),
     [moraYes ? 'Loan Tenor including Moratorium at Disbursement (Months)' : 'Loan Tenor at Disbursement (Months)', inputs.tenorMonths ?? 0, 'int'],
   ];
   const TENOR_ROW = 5 + inputRows.length - 1;
@@ -959,7 +987,7 @@ function downloadRevisionStructuredVerify(filename, ctx) {
     return segs.map((s, i) => {
       const startRef = i === 0 ? `B${psXr}` : dateLit(s.from);
       const endRef = i === segs.length - 1 ? `B${xr}` : dateLit(s.to);
-      return `(F${psXr}*${lendCell(s.from)}/360*DAYS360(${startRef},${endRef}))`;
+      return `(F${psXr}*${lendCell(s.from)}/360*${daysExpr(startRef, endRef)})`;
     }).join('+');
   };
 
@@ -1005,8 +1033,16 @@ function downloadRevisionStructuredVerify(filename, ctx) {
     // D Interest = URPA_prev * lending rate / (12 or 4); day-count split when a rate
     // revision falls inside the accrual period; maturity stub accrues nominal months.
     const accrualStart = rows[i - 1].date; // accrual period starts on the previous row's date
+    // Day-count products: balance at the period start × rate × days between the period's two
+    // date cells / 360 — the previous row for a month, three rows up for a quarter, the stub's
+    // own start for a maturity stub.
+    const dayD = (startXr) => `F${pr}*${lendCell(accrualStart)}*${daysExpr(`B${startXr}`, `B${xr}`)}/360`;
     if (r.splitSegments) {
       setCell(ws, `D${xr}`, 0, { f: splitDFormula(r, xr), z: FMT.ACCOUNTING });
+    } else if (dayMode && (r.intFlag || isMora)) {
+      setCell(ws, `D${xr}`, 0, { f: dayD(pr), z: FMT.ACCOUNTING });
+    } else if (dayMode && isPaymentRow) {
+      setCell(ws, `D${xr}`, 0, { f: dayD(xr - (r.stubMonths || (ppyDiv === 12 ? 1 : 3))), z: FMT.ACCOUNTING });
     } else if (r.intFlag) {
       // Split type: interest accrues MONTHLY on the prior balance in every month, whether or
       // not it is settled this month — so no quarterly divisor and no stub multiplier.
@@ -1043,7 +1079,7 @@ function downloadRevisionStructuredVerify(filename, ctx) {
       // balance plus the stub interest (+ any uncollected moratorium accrued).
       setCell(ws, `E${xr}`, 0, { f: `F${pr}`, z: FMT.ACCOUNTING });
       setCell(ws, `C${xr}`, 0, { f: `D${xr}+E${xr}+I${pr}`, z: FMT.ACCOUNTING });
-    } else if (isPaymentRow && isAnnuity && r.splitSegments) {
+    } else if (isPaymentRow && isAnnuity && (r.splitSegments || (dayMode && r.xStart))) {
       // Mid-period revision: the installment is the goal-sought constant, written as a VALUE
       // (per the rectified file); unpaid moratorium accrued (I prev) rides on top of it, so
       // principal excludes it: E = C - D - I(prev). Full precision — the whole chain of
@@ -1051,9 +1087,11 @@ function downloadRevisionStructuredVerify(filename, ctx) {
       setCell(ws, `C${xr}`, numHi(r.installment), { z: FMT.ACCOUNTING });
       setCell(ws, `E${xr}`, 0, { f: `C${xr}-D${xr}-I${pr}`, z: FMT.ACCOUNTING });
       chainPayXr = xr; chainRate = r.rate;
-    } else if (isPaymentRow && isAnnuity && chainPayXr !== null && r.rate === chainRate) {
+    } else if (isPaymentRow && isAnnuity && chainPayXr !== null && (dayMode || r.rate === chainRate)) {
       // Same rate block as the goal-sought payment: installments stay constant, =C(prev payment).
-      setCell(ws, `C${xr}`, 0, { f: `C${chainPayXr}`, z: FMT.ACCOUNTING });
+      // Under a day-count product the first payment of a stretch may also carry the moratorium's
+      // accrued interest (I of the row before it), which the next installment leaves out.
+      setCell(ws, `C${xr}`, 0, { f: dayMode ? `C${chainPayXr}-I${chainPayXr - 1}` : `C${chainPayXr}`, z: FMT.ACCOUNTING });
       setCell(ws, `E${xr}`, 0, { f: `C${xr}-D${xr}`, z: FMT.ACCOUNTING });
       chainPayXr = xr;
     } else if (isPaymentRow && isAnnuity) {
@@ -1107,7 +1145,9 @@ function downloadRevisionStructuredVerify(filename, ctx) {
       if (cleared) setCell(ws, `I${xr}`, 0, { z: FMT.ACCOUNTING });
       else setCell(ws, `I${xr}`, 0, { f: `I${pr}+D${xr}`, z: FMT.ACCOUNTING });
     } else {
-      setCell(ws, `I${xr}`, num(r.idpReceivable || 0), { z: FMT.ACCOUNTING });
+      // Full precision under a day-count product: the goal-sought chain subtracts this carry
+      // from the first installment, and a 2dp carry would leave a few paisa at maturity.
+      setCell(ws, `I${xr}`, (dayMode ? numHi : num)(r.idpReceivable || 0), { z: FMT.ACCOUNTING });
     }
     // J Loan Security Balance (cumulative amount active by the date; released to 0 at maturity);
     // K Loan Security Benefit = PRIOR row balance*(COF − weighted-avg security rate)/12 (one-month lag)
@@ -1250,7 +1290,12 @@ function downloadRevisionStructuredVerify(filename, ctx) {
   XLSX.utils.book_append_sheet(wb, wsL, 'Rate_Security_COF_Layers');
   XLSX.utils.book_append_sheet(wb, ws, 'Schedule');
   const newInstallment = securityLayers.some((l) => (l.securities || []).some((x) => x.newInst));
-  writeVerificationWorkbook(wb, filename, 'revisionStructured', { newInstallment });
+  const interestRule = {
+    days360: 'Balance at the start of the period × the interest rate × DAYS360(start date, end date) ÷ 360 (CBS product: DAYS360).',
+    act360: 'Balance at the start of the period × the interest rate × the real days from start date to end date ÷ 360 (CBS product: Actual/360).',
+    nominal: 'Balance at the start of the period × the interest rate ÷ the interest payments a year (12 monthly, 4 quarterly, 2 half-yearly); a rate change inside a period splits it by DAYS360 (CBS product: Accrued Interest/X).',
+  }[dayCount];
+  writeVerificationWorkbook(wb, filename, 'revisionStructured', { newInstallment, interestRule, goalSeek: dayMode && isAnnuity });
 }
 
 // Build the Rate_Security_COF_Layers worksheet. Three side-by-side tables; the Schedule

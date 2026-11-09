@@ -6,8 +6,8 @@
 // that with two modules and a handful of questions the RM can actually answer; the answers
 // decide which form they land on, and are carried into it so nothing is asked twice.
 // ============================================================
-import { el, optionField } from './components.js?v=20261102b';
-import { SPLIT_MODE } from './calculations.js?v=20261102b';
+import { el, optionField } from './components.js?v=20261109b';
+import { SPLIT_MODE, CBS_PRODUCTS } from './calculations.js?v=20261109b';
 
 // "Upload an existing schedule" is switched off until it is ready to offer (user, 01-Nov-2026).
 // While it is off, Rate Revision goes straight to its questions; true brings the fork back.
@@ -78,6 +78,16 @@ export function renderQuestions(root, ctx, go) {
   const isLoan = ctx.module === 'loan';
   const a = ctx.answers || {};
 
+  // Rate Revision only, asked first: the loan's product in the bank's core banking system,
+  // which decides how each period's interest is counted.
+  const product = optionField({
+    label: 'Select the CBS Product for the Schedule', name: 'qProduct',
+    options: [{ label: 'select', value: '' }, ...CBS_PRODUCTS.map(({ value, label }) => ({ value, label }))],
+    value: a.cbsProduct || '',
+    help: 'DAYS360 counts every month as 30 days, Actual/360 counts the real days, and Accrued Interest/X divides the yearly rate by the interest payments a year.',
+    onChange: () => refresh(),
+  });
+
   const mora = optionField({
     label: 'Does the loan have a moratorium period?', name: 'qMora',
     options: [{ label: 'select', value: '' }, 'No', 'Yes'], value: a.moratorium || '',
@@ -105,6 +115,7 @@ export function renderQuestions(root, ctx, go) {
     onChange: () => refresh(),
   });
 
+  const productRow = el('div', { class: 'form-row' }, product);
   const moraRow = el('div', { class: 'form-row' }, mora);
   const ratesRow = el('div', { class: 'form-row' }, rates);
   const layersRow = el('div', { class: 'form-row' }, layers);
@@ -112,7 +123,7 @@ export function renderQuestions(root, ctx, go) {
 
   const contBtn = el('button', { class: 'primary-btn', type: 'button' }, 'Continue');
 
-  const card = el('div', { class: 'section-card' }, moraRow, ratesRow, layersRow, modalityRow,
+  const card = el('div', { class: 'section-card' }, ...(isLoan ? [] : [productRow]), moraRow, ratesRow, layersRow, modalityRow,
     el('div', { class: 'action-bar' }, contBtn));
 
   root.appendChild(el('div', { class: 'screen' },
@@ -122,7 +133,8 @@ export function renderQuestions(root, ctx, go) {
 
   // How many months is asked on the form itself; here we only need to know whether there
   // is a moratorium at all, since that is what the later labels and routing depend on.
-  const moraAnswered = () => !!mora.getValue();
+  const productAnswered = () => isLoan || !!product.getValue();
+  const moraAnswered = () => productAnswered() && !!mora.getValue();
   // Revision has no rates question (its Lending Rate Layers already carry every change).
   const ratesAnswered = () => !isLoan || !!rates.getValue();
   // Revision has no layers question, so it always needs a modality.
@@ -132,6 +144,7 @@ export function renderQuestions(root, ctx, go) {
     const yes = mora.getValue() === 'Yes';
 
     // Each question appears only once the one before it is settled.
+    moraRow.classList.toggle('hidden', !productAnswered());
     ratesRow.classList.toggle('hidden', !isLoan || !moraAnswered());
     layersRow.classList.toggle('hidden', !isLoan || !moraAnswered() || !ratesAnswered());
     layers.setLabel(yes
@@ -155,6 +168,7 @@ export function renderQuestions(root, ctx, go) {
       rateLayers: isLoan ? rates.getValue() : 'No',
       multiLayers: isLoan ? layers.getValue() : 'No',
       modality: needsModality() ? modality.getValue() : null,
+      cbsProduct: isLoan ? null : product.getValue(),
     };
     go({
       screen: 'form',
@@ -170,6 +184,8 @@ export function renderQuestions(root, ctx, go) {
 export function answerSummary(ctx, onEdit) {
   const a = ctx.answers || {};
   const bits = [];
+  const product = CBS_PRODUCTS.find(p => p.value === a.cbsProduct);
+  if (ctx.module === 'revision' && product) bits.push(product.short);
   bits.push(a.moratorium === 'Yes' ? 'Moratorium' : 'No moratorium');
   if (ctx.module === 'loan') bits.push(a.rateLayers === 'Yes' ? 'Multiple interest rates' : 'Single interest rate');
   if (ctx.module === 'loan') bits.push(a.multiLayers === 'Yes' ? 'Multiple payment layers' : 'Single modality');

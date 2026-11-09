@@ -1,6 +1,6 @@
 // Per-module user guide — opened from the info button in the header. Plain, simple language
 // (explained as if to a 10-year-old). Sections are collapsed by default; click to expand.
-import { el, openModal, closeModal } from './components.js?v=20261102b';
+import { el, openModal, closeModal } from './components.js?v=20261109b';
 
 // ---- Shared sections reused across modules ----
 const MODALITY_BULLETS = [
@@ -29,7 +29,7 @@ const FLOW_SECTION = {
   h: 'How this page works',
   p: 'Each module has two steps, so you are never shown boxes that have nothing to do with your deal.',
   bullets: [
-    'Step 1 — a few short questions: is there a moratorium, does the interest rate change during the loan, does the payment style change part-way through the loan, and if it does not, which style is it.',
+    'Step 1 — a few short questions: is there a moratorium, does the interest rate change during the loan, does the payment style change part-way through the loan, and if it does not, which style is it. Rate Revision also asks which CBS product the loan uses.',
     'Step 2 — the form: everything else. Only the boxes your answers made relevant appear.',
     'The grey pills along the top of the form show what you answered in step 1. Click “Change” next to them to go back and answer differently.',
   ],
@@ -146,8 +146,19 @@ const MANUALS = {
   // Step 1 of Rate Revision: no layers question here.
   questionsRevision: {
     title: 'ERR - Rate Revision — the questions',
-    intro: 'Two short questions about the facility as it was originally given out. The rate changes themselves are listed on the next screen.',
+    intro: 'Three short questions about the facility as it was originally given out. The rate changes themselves are listed on the next screen.',
     sections: [
+      {
+        h: 'Select the CBS Product for the Schedule',
+        p: 'How the bank’s core banking system (CBS) counts interest on this loan. Pick the product the loan has in the CBS:',
+        bullets: [
+          'DAYS360(Start Date, End Date)/360 — every month counts as 30 days, the year as 360 (Excel’s DAYS360).',
+          'Actual/360 — the real number of days between two payment dates, over a 360-day year, so a 31-day month earns a little more than a 30-day month.',
+          'Accrued Interest/X — the yearly rate divided by the number of interest payments a year: 12 for monthly, 4 for quarterly, 2 for half-yearly.',
+          'With DAYS360 or Actual/360, an EMI or EQI stays the same every period, the last one included: it is found by goal seek so the loan ends at exactly zero, and found again only when the rate changes.',
+          'Only the client’s interest follows the product; the cost of fund and the security benefit are worked out as before.',
+        ],
+      },
       MORATORIUM_Q,
       {
         h: 'Payment Modality',
