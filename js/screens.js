@@ -6,8 +6,8 @@
 // that with two modules and a handful of questions the RM can actually answer; the answers
 // decide which form they land on, and are carried into it so nothing is asked twice.
 // ============================================================
-import { el, optionField } from './components.js?v=20261109c';
-import { SPLIT_MODE, CBS_PRODUCTS } from './calculations.js?v=20261109c';
+import { el, optionField } from './components.js?v=20261109d';
+import { SPLIT_MODE, CBS_PRODUCTS } from './calculations.js?v=20261109d';
 
 // "Upload an existing schedule" is switched off until it is ready to offer (user, 01-Nov-2026).
 // While it is off, Rate Revision goes straight to its questions; true brings the fork back.

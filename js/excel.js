@@ -1,6 +1,6 @@
 // Excel / Word / PDF I/O via CDN libs
-import { formatMoney as fmtM, formatPercent as fmtP } from './formatting.js?v=20261109c';
-import { SPLIT_MODE, REFINANCE_RATE, REFINANCE_LENDING_RATE, REFINANCE_COF, CBS_PRODUCTS } from './calculations.js?v=20261109c';
+import { formatMoney as fmtM, formatPercent as fmtP } from './formatting.js?v=20261109d';
+import { SPLIT_MODE, REFINANCE_RATE, REFINANCE_LENDING_RATE, REFINANCE_COF, CBS_PRODUCTS } from './calculations.js?v=20261109d';
 
 // Funded Security as it READS on screen. The stored value is always "<kind> after Moratorium",
 // but on a loan with no moratorium the UI shows "<kind> Installment" — the workbook quotes the
@@ -1244,13 +1244,17 @@ function downloadRevisionStructuredVerify(filename, ctx) {
     setCell(wsI, `H${r}`, 0, { f, z, s: RR_STYLE.cell });
   });
 
-  // ----- Yearly Summary (fixed: banner row 14, headers row 15, data from row 16) -----
+  // ----- Yearly Summary: banner on row 14, or on the row after the last input when the input
+  // list runs that far (Separate Frequency + moratorium + CBS Product = 10 inputs, rows 5–14);
+  // headers on the next row, then one row per year. A banner on an input row would overlap the
+  // input merges, and Excel refuses to open a file with overlapping merges.
   const years = Math.ceil((rows.length - 1) / 12);
-  setCell(wsI, 'A14', 'Yearly Summary', { text: true, s: RR_STYLE.banner });
+  const YS = Math.max(14, 4 + inputRows.length + 1);
+  setCell(wsI, `A${YS}`, 'Yearly Summary', { text: true, s: RR_STYLE.banner });
   ['Year', 'Interest Income', 'Interest Expense', 'Loan Security Benefit', 'Net Interest Income', 'Average Portfolio', 'NIM', 'YoY ERR']
-    .forEach((h, c) => setCell(wsI, XLSX.utils.encode_cell({ r: 14, c }), h, { text: true, s: RR_STYLE.colHead }));
+    .forEach((h, c) => setCell(wsI, XLSX.utils.encode_cell({ r: YS, c }), h, { text: true, s: RR_STYLE.colHead }));
   for (let y = 1; y <= years; y++) {
-    const yr = 15 + y;
+    const yr = YS + 1 + y;
     const firstSl = (y - 1) * 12 + 1;
     const lastSl = Math.min(y * 12, rows.length - 1);
     const dFrom = firstSl + 2, dTo = lastSl + 2;             // interest/expense rows (sl)
@@ -1269,16 +1273,16 @@ function downloadRevisionStructuredVerify(filename, ctx) {
     // YoY ERR = (yearly Interest Expense / yearly Avg Portfolio, annualised) + yearly NIM
     setCell(wsI, `H${yr}`, 0, { f: `(C${yr}/F${yr}*12/${yMonths})+G${yr}`, z: RR_FMT.PCT4, s: RR_STYLE.cell });
   }
-  const lastRow = 15 + years;
+  const lastRow = YS + 1 + years;
 
   wsI['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: lastRow - 1, c: 7 } });
   wsI['!cols'] = [{ wch: 24 }, { wch: 13 }, { wch: 12 }, { wch: 15 }, { wch: 14 }, { wch: 18 }, { wch: 12 }, { wch: 14 }];
-  wsI['!rows'] = []; wsI['!rows'][0] = { hpt: 21 }; wsI['!rows'][3] = { hpt: 19.5 }; wsI['!rows'][13] = { hpt: 19.5 }; wsI['!rows'][14] = { hpt: 30.75 };
+  wsI['!rows'] = []; wsI['!rows'][0] = { hpt: 21 }; wsI['!rows'][3] = { hpt: 19.5 }; wsI['!rows'][YS - 1] = { hpt: 19.5 }; wsI['!rows'][YS] = { hpt: 30.75 };
   const mergeRC = (r1, c1, r2, c2) => ({ s: { r: r1, c: c1 }, e: { r: r2, c: c2 } });
   wsI['!merges'] = [
     mergeRC(0, 0, 0, 7), mergeRC(1, 0, 1, 7),        // title + subtitle
     mergeRC(3, 0, 3, 2), mergeRC(3, 5, 3, 7),        // Inputs banner (A:C), Results banner (F:H)
-    mergeRC(13, 0, 13, 7),                            // Yearly Summary banner
+    mergeRC(YS - 1, 0, YS - 1, 7),                    // Yearly Summary banner
   ];
   for (let i = 0; i < inputRows.length; i++) wsI['!merges'].push(mergeRC(4 + i, 0, 4 + i, 2)); // input labels A:C
   for (let i = 0; i < RES.length; i++) wsI['!merges'].push(mergeRC(4 + i, 5, 4 + i, 6));        // result labels F:G
