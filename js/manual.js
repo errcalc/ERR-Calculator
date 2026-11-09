@@ -1,6 +1,6 @@
 // Per-module user guide — opened from the info button in the header. Plain, simple language
 // (explained as if to a 10-year-old). Sections are collapsed by default; click to expand.
-import { el, openModal, closeModal } from './components.js?v=20261109b';
+import { el, openModal, closeModal } from './components.js?v=20261109c';
 
 // ---- Shared sections reused across modules ----
 const MODALITY_BULLETS = [
@@ -153,8 +153,7 @@ const MANUALS = {
         p: 'How the bank’s core banking system (CBS) counts interest on this loan. Pick the product the loan has in the CBS:',
         bullets: [
           'DAYS360(Start Date, End Date)/360 — every month counts as 30 days, the year as 360 (Excel’s DAYS360).',
-          'Actual/360 — the real number of days between two payment dates, over a 360-day year, so a 31-day month earns a little more than a 30-day month.',
-          'Accrued Interest/X — the yearly rate divided by the number of interest payments a year: 12 for monthly, 4 for quarterly, 2 for half-yearly.',
+          'Actual/360 — the days from one payment date to the next (End Date − Start Date), over a 360-day year, so a 31-day month earns a little more than a 30-day month.',
           'With DAYS360 or Actual/360, an EMI or EQI stays the same every period, the last one included: it is found by goal seek so the loan ends at exactly zero, and found again only when the rate changes.',
           'Only the client’s interest follows the product; the cost of fund and the security benefit are worked out as before.',
         ],

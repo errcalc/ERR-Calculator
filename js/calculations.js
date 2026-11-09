@@ -740,12 +740,12 @@ export function actualDays(startISO, endISO) {
 }
 
 // How the bank's core system (CBS) product counts a period's interest — the first question of
-// Rate Revision. 'nominal' is the original rule: rate ÷ interest payments a year (12 monthly,
-// 4 quarterly, 2 half-yearly), with a revision inside a period split by DAYS360.
+// Rate Revision. The engine still knows 'nominal', the original rule (rate ÷ interest payments a
+// year, a revision inside a period split by DAYS360), but it is no longer offered: DAYS360 gives
+// the same figures except where due dates fall at a month-end (user, 09-Nov-2026).
 export const CBS_PRODUCTS = [
   { value: 'days360', label: 'DAYS360(Start Date, End Date)/360', short: 'DAYS360/360' },
   { value: 'act360', label: 'Actual/360', short: 'Actual/360' },
-  { value: 'nominal', label: 'Accrued Interest/X (X = 12 monthly, 4 quarterly, 2 half-yearly)', short: 'Accrued Interest/X' },
 ];
 
 export function buildRateRevisionStructured(p) {
@@ -765,12 +765,12 @@ export function buildRateRevisionStructured(p) {
     principalPeriod = null,
     principalBasis = 'fixed',
     customPrincipals = [],
-    dayCount = 'nominal',   // CBS product: 'nominal' | 'days360' | 'act360' (client interest only)
+    dayCount = 'days360',   // CBS product: 'days360' | 'act360' (client interest only); 'nominal' = the original rule
   } = p;
 
   const isSplit = !!(interestPeriod && principalPeriod);
-  // Days in a stretch of the client's interest: Actual/360 counts calendar days; DAYS360 and
-  // the original rule's mid-period splits use Excel's DAYS360.
+  // Days in a stretch of the client's interest: Actual/360 counts End Date − Start Date; DAYS360
+  // and the original rule's mid-period splits use Excel's DAYS360.
   const daysIn = dayCount === 'act360' ? actualDays : days360;
   // Principal dates and the divisor that keeps the payments equal (maturity included).
   // Split legs count from the month after the moratorium, like buildSplitSchedule.

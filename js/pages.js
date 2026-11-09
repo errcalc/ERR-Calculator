@@ -3,23 +3,23 @@ import {
   el, numberField, percentField, optionField, dateField, textField,
   monthBoxesField, layeredField, securityLayersField, rateLayersField, monthRateLayersField, toast, parseDDMMMYYYY, formatDDMMMYYYY,
   openModal, closeModal,
-} from './components.js?v=20261109b';
-import { isoToDDMMMYYYY } from './formatting.js?v=20261109b';
+} from './components.js?v=20261109c';
+import { isoToDDMMMYYYY } from './formatting.js?v=20261109c';
 import {
   buildStructuredSchedule, buildCustomizedSchedule,
   buildRateRevisionStructured, computeMetrics,
   buildSplitSchedule, principalPaymentMonths, SPLIT_MODE, FREQ, FREQ_NAMES,
   computeRevisionMetrics, computeRevisionCustomizedMetrics, buildCofData,
   addMonthsDue, COMMERCIAL_RATE, REFINANCE_RATE, REFINANCE_LENDING_RATE,
-} from './calculations.js?v=20261109b';
-import { formatMoney, formatPercent, formatNumber, formatRateLayers } from './formatting.js?v=20261109b';
-import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20261109b';
+} from './calculations.js?v=20261109c';
+import { formatMoney, formatPercent, formatNumber, formatRateLayers } from './formatting.js?v=20261109c';
+import { saveSummary, listSummaries, getMax, saveDraft, loadDraft, clearDraft } from './storage.js?v=20261109c';
 import {
   downloadScheduleAsExcel, downloadSampleAmortization, readUploadedSchedule,
   downloadScheduleAsWord, downloadScheduleAsPDF, downloadVerificationExcel,
   downloadCofSample, readUploadedCof,
   downloadCustomizedRevisionSample, readCustomizedRevisionFile,
-} from './excel.js?v=20261109b';
+} from './excel.js?v=20261109c';
 
 // Cached page state by tab key (also persisted via storage saveDraft)
 const tabState = {};
@@ -1099,8 +1099,8 @@ export function renderRateRevisionStructured(root, pre = null) {
       securityLayers: [],
       cofData: [],
       maturityDate: mat,
-      // The CBS Product answered in step 1; an older flow without it keeps the original rule.
-      dayCount: (pre && pre.cbsProduct) || 'nominal',
+      // The CBS Product answered in step 1; a flow without one (an older draft) counts DAYS360.
+      dayCount: (pre && pre.cbsProduct) || 'days360',
     };
     if (rrSplit) {
       Object.assign(params, {

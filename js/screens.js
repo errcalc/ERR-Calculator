@@ -6,8 +6,8 @@
 // that with two modules and a handful of questions the RM can actually answer; the answers
 // decide which form they land on, and are carried into it so nothing is asked twice.
 // ============================================================
-import { el, optionField } from './components.js?v=20261109b';
-import { SPLIT_MODE, CBS_PRODUCTS } from './calculations.js?v=20261109b';
+import { el, optionField } from './components.js?v=20261109c';
+import { SPLIT_MODE, CBS_PRODUCTS } from './calculations.js?v=20261109c';
 
 // "Upload an existing schedule" is switched off until it is ready to offer (user, 01-Nov-2026).
 // While it is off, Rate Revision goes straight to its questions; true brings the fork back.
@@ -84,7 +84,7 @@ export function renderQuestions(root, ctx, go) {
     label: 'Select the CBS Product for the Schedule', name: 'qProduct',
     options: [{ label: 'select', value: '' }, ...CBS_PRODUCTS.map(({ value, label }) => ({ value, label }))],
     value: a.cbsProduct || '',
-    help: 'DAYS360 counts every month as 30 days, Actual/360 counts the real days, and Accrued Interest/X divides the yearly rate by the interest payments a year.',
+    help: 'DAYS360 counts every month as 30 days; Actual/360 counts the days from start date to end date (End Date − Start Date). Both divide by 360.',
     onChange: () => refresh(),
   });
 

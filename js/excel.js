@@ -1,6 +1,6 @@
 // Excel / Word / PDF I/O via CDN libs
-import { formatMoney as fmtM, formatPercent as fmtP } from './formatting.js?v=20261109b';
-import { SPLIT_MODE, REFINANCE_RATE, REFINANCE_LENDING_RATE, REFINANCE_COF, CBS_PRODUCTS } from './calculations.js?v=20261109b';
+import { formatMoney as fmtM, formatPercent as fmtP } from './formatting.js?v=20261109c';
+import { SPLIT_MODE, REFINANCE_RATE, REFINANCE_LENDING_RATE, REFINANCE_COF, CBS_PRODUCTS } from './calculations.js?v=20261109c';
 
 // Funded Security as it READS on screen. The stored value is always "<kind> after Moratorium",
 // but on a loan with no moratorium the UI shows "<kind> Installment" — the workbook quotes the
@@ -903,7 +903,7 @@ function downloadRevisionStructuredVerify(filename, ctx) {
   // CBS Product: how each period's client interest is counted. Under DAYS360 and Actual/360 the
   // interest formulas count the days between the period's two date cells over 360, and an
   // EMI/EQI is the goal-sought installment, written as a value where each rate stretch begins.
-  const dayCount = params.dayCount || 'nominal';
+  const dayCount = params.dayCount || 'days360';
   const dayMode = dayCount !== 'nominal';
   const daysExpr = (a, b) => (dayCount === 'act360' ? `(${b}-${a})` : `DAYS360(${a},${b})`);
   const product = CBS_PRODUCTS.find((x) => x.value === dayCount);
@@ -1292,7 +1292,7 @@ function downloadRevisionStructuredVerify(filename, ctx) {
   const newInstallment = securityLayers.some((l) => (l.securities || []).some((x) => x.newInst));
   const interestRule = {
     days360: 'Balance at the start of the period × the interest rate × DAYS360(start date, end date) ÷ 360 (CBS product: DAYS360).',
-    act360: 'Balance at the start of the period × the interest rate × the real days from start date to end date ÷ 360 (CBS product: Actual/360).',
+    act360: 'Balance at the start of the period × the interest rate × (End Date − Start Date) ÷ 360 (CBS product: Actual/360).',
     nominal: 'Balance at the start of the period × the interest rate ÷ the interest payments a year (12 monthly, 4 quarterly, 2 half-yearly); a rate change inside a period splits it by DAYS360 (CBS product: Accrued Interest/X).',
   }[dayCount];
   writeVerificationWorkbook(wb, filename, 'revisionStructured', { newInstallment, interestRule, goalSeek: dayMode && isAnnuity });
